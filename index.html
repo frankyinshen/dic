@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>语音拼写生词本</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; background: #f4f7f6; color: #333; }
+        .card { background: white; padding: 25px 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 20px; text-align: center; }
+        h2 { margin-top: 0; font-size: 20px; color: #2c3e50; display: flex; justify-content: space-between; align-items: center;}
+        
+        #recordBtn { background: #007bff; color: white; border: none; padding: 15px 30px; font-size: 18px; border-radius: 50px; cursor: pointer; user-select: none; transition: all 0.2s; width: 100%; box-shadow: 0 4px 6px rgba(0,123,255,0.3); -webkit-touch-callout: none; }
+        #recordBtn:active, #recordBtn.recording { background: #dc3545; box-shadow: 0 2px 4px rgba(220,53,69,0.3); transform: translateY(2px); }
+        
+        #exportBtn { background: #28a745; color: white; border: none; padding: 8px 15px; font-size: 14px; border-radius: 6px; cursor: pointer; transition: background 0.2s; }
+        #exportBtn:hover { background: #218838; }
+
+        .status { margin-top: 15px; font-size: 14px; color: #888; height: 20px; }
+        #resultWord { font-size: 36px; font-weight: bold; margin: 15px 0; color: #2c3e50; letter-spacing: 2px; }
+        #meaning { font-size: 15px; color: #555; min-height: 45px; background: #f8f9fa; padding: 10px; border-radius: 8px; }
+        
+        .input-group { text-align: left; margin-bottom: 15px; }
+        label { font-size: 14px; font-weight: bold; color: #555; display: block; margin-bottom: 5px; }
+        input[type="text"] { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 16px; }
+        
+        .word-list { text-align: left; }
+        .archive-group { margin-top: 20px; }
+        .archive-header { background: #e9ecef; padding: 8px 12px; border-radius: 6px; font-weight: bold; font-size: 14px; color: #495057; display: flex; justify-content: space-between; }
+        .word-item { padding: 12px 10px; border-bottom: 1px solid #eee; }
+        .word-item:last-child { border-bottom: none; }
+        .word-word { font-size: 18px; font-weight: bold; color: #007bff; }
+        .word-meaning { font-size: 14px; color: #666; margin-top: 4px; display: block; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h2>🎙️ 按住读字母拼写</h2>
+        
+        <div class="input-group">
+            <label for="archiveName">归档名称 (可修改为书名/章节):</label>
+            <input type="text" id="archiveName" placeholder="例如: 2026-02-20 或 简爱-第一章">
+        </div>
+
+        <button id="recordBtn">按住开始拼写字母</button>
+        <div class="status" id="statusText">准备就绪...</div>
+        
+        <div id="resultWord">...</div>
+        <div id="meaning">等待查词...</div>
+    </div>
+
+    <div class="card word-list">
+        <h2>
+            📚 你的生词本
+            <button id="exportBtn">💾 导出 CSV</button>
+        </h2>
+        <div id="vocabList"></div>
+    </div>
+
+    <script>
+        // 初始化日期作为默认归档名
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('archiveName').value = today;
+
+        const recordBtn = document.getElementById('recordBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const statusText = document.getElementById('statusText');
+        const resultWordDisplay = document.getElementById('resultWord');
+        const meaningDisplay = document.getElementById('meaning');
+        const vocabListDisplay = document.getElementById('vocabList');
+
+        // 初始化语音识别 (使用英文识别以确保字母准确度)
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition;
+        
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.lang = 'en-US'; 
+            recognition.interimResults = false;
+            recognition.maxAlternatives = 1;
+
+            recognition.onstart = () => {
+                statusText.innerText = "正在聆听字母 (例如读 'A P P L E')...";
+            };
+
+            recognition.onresult = async (event) => {
+                const transcript = event.results[0][0].transcript;
+                const word = transcript.replace(/\s+/g, '').toLowerCase();
+                
+                resultWordDisplay.innerText = word;
+                statusText.innerText = "正在查询意思...";
+                meaningDisplay.innerText = "查询中...";
+
+                await processWord(word);
+            };
+
+            recognition.onerror = (event) => {
+                statusText.innerText = "识别出错: " + event.error + "。请再试一次。";
+            };
+
+            recognition.onend = () => {
+                recordBtn.classList.remove('recording');
+                recordBtn.innerText = "按住开始拼写字母";
+            };
+        } else {
+            statusText.innerText = "你的浏览器不支持语音识别，请使用Chrome或Edge。";
+            recordBtn.disabled = true;
+        }
+
+        const startRecording = (e) => {
+            e.preventDefault();
+            if(!recognition) return;
+            recordBtn.classList.add('recording');
+            recordBtn.innerText = "松开结束并确认...";
+            recognition.start();
+        };
+
+        const stopRecording = (e) => {
+            e.preventDefault();
+            if(!recognition) return;
+            recognition.stop();
+        };
+
+        recordBtn.addEventListener('mousedown', startRecording);
+        recordBtn.addEventListener('mouseup', stopRecording);
+        recordBtn.addEventListener('touchstart', startRecording);
+        recordBtn.addEventListener('touchend', stopRecording);
+
+        // 处理单词：查询释义并保存
+        async function processWord(word) {
+            if (!/^[a-z]+$/.test(word)) {
+                meaningDisplay.innerText = "未识别出纯字母构成的单词，请确保读音清晰。";
+                return;
+            }
+
+            let meaning = "暂无释义，可能拼写有误或字典未收录。";
+            
+            try {
+                const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    meaning = data[0].meanings[0].definitions[0].definition;
+                }
+            } catch (error) {
+                console.error(error);
+                meaning = "网络错误，无法获取释义。";
+            }
+
+            meaningDisplay.innerText = meaning;
+            saveWord(word, meaning);
+            renderVocabList();
+        }
+
+        // 保存单词到 LocalStorage
+        function saveWord(word, meaning) {
+            const archiveName = document.getElementById('archiveName').value || today;
+            let vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
+            
+            if (!vocabData[archiveName]) {
+                vocabData[archiveName] = [];
+            }
+            
+            const exists = vocabData[archiveName].find(w => w.word === word);
+            if (!exists) {
+                vocabData[archiveName].unshift({ word, meaning });
+                localStorage.setItem('myVocabBook', JSON.stringify(vocabData));
+            }
+        }
+
+        // 渲染生词列表
+        function renderVocabList() {
+            const vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
+            vocabListDisplay.innerHTML = '';
+
+            for (const archive in vocabData) {
+                const groupDiv = document.createElement('div');
+                groupDiv.className = 'archive-group';
+                
+                const header = document.createElement('div');
+                header.className = 'archive-header';
+                header.innerHTML = `<span>📂 ${archive}</span> <span>${vocabData[archive].length} 词</span>`;
+                groupDiv.appendChild(header);
+
+                vocabData[archive].forEach(item => {
+                    const wordDiv = document.createElement('div');
+                    wordDiv.className = 'word-item';
+                    wordDiv.innerHTML = `
+                        <span class="word-word">${item.word}</span>
+                        <span class="word-meaning">${item.meaning}</span>
+                    `;
+                    groupDiv.appendChild(wordDiv);
+                });
+
+                vocabListDisplay.appendChild(groupDiv);
+            }
+        }
+
+        // 导出为 CSV 功能
+        exportBtn.addEventListener('click', () => {
+            const vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
+            if (Object.keys(vocabData).length === 0) {
+                alert("生词本是空的，先去录入几个单词吧！");
+                return;
+            }
+
+            // 添加 BOM 头部，防止 Excel 打开时中文乱码
+            let csvContent = "\uFEFF归档名称,单词,释义\n";
+
+            for (const archive in vocabData) {
+                vocabData[archive].forEach(item => {
+                    // 处理释义中可能包含的双引号，并用双引号包裹每个字段，防止逗号破坏格式
+                    let safeMeaning = item.meaning.replace(/"/g, '""');
+                    csvContent += `"${archive}","${item.word}","${safeMeaning}"\n`;
+                });
+            }
+
+            // 创建 Blob 并触发下载
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", `生词本_${today}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+
+        // 初始化渲染
+        renderVocabList();
+    </script>
+</body>
+</html>
