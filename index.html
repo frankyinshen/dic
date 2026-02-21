@@ -3,25 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>语音拼写生词本 v2.2.0</title>
+    <title>语音拼写生词本 v2.3.0</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; background: #f4f7f6; color: #333; }
         .card { background: white; padding: 25px 20px; border-radius: 16px; box-shadow: 0 8px 20px rgba(0,0,0,0.06); margin-bottom: 20px; text-align: center; }
         h2 { margin-top: 0; font-size: 20px; color: #1c1c1e; display: flex; justify-content: space-between; align-items: center;}
-        .version-tag { font-size: 12px; background: #34c759; padding: 2px 8px; border-radius: 10px; color: white; font-weight: bold; }
+        .version-tag { font-size: 12px; background: #000; padding: 3px 10px; border-radius: 12px; color: #ffd700; font-weight: bold; letter-spacing: 0.5px;}
         
-        #recordBtn { background: #007aff; color: white; border: none; padding: 16px 30px; font-size: 18px; font-weight: 600; border-radius: 50px; cursor: pointer; user-select: none; transition: all 0.2s; width: 100%; box-shadow: 0 4px 12px rgba(0,122,255,0.3); -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;}
+        #recordBtn { background: #007aff; color: white; border: none; padding: 18px 30px; font-size: 18px; font-weight: 600; border-radius: 50px; cursor: pointer; user-select: none; transition: all 0.2s; width: 100%; box-shadow: 0 4px 12px rgba(0,122,255,0.3); -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;}
         
-        /* 按下时的状态 */
+        /* 按下录音时的状态 */
         #recordBtn.recording { background: #ff3b30; box-shadow: 0 4px 12px rgba(255,59,48,0.4); transform: scale(0.96); }
-        /* 锁定处理时的状态 */
-        #recordBtn.busy { background: #8e8e93; box-shadow: none; transform: none; pointer-events: none; }
+        /* 松开手，等待苹果服务器时的缓冲状态 */
+        #recordBtn.busy { background: #ff9500; box-shadow: 0 4px 12px rgba(255,149,0,0.4); pointer-events: none; transform: none; }
 
         #exportBtn { background: #34c759; color: white; border: none; padding: 8px 15px; font-size: 14px; font-weight: 600; border-radius: 8px; cursor: pointer; transition: opacity 0.2s; }
         #exportBtn:active { opacity: 0.7; }
 
         .status { margin-top: 15px; font-size: 14px; color: #8e8e93; min-height: 20px; font-weight: 500; }
-        #rawTranscript { margin-top: 8px; font-size: 13px; color: #d09a00; display: block; min-height: 15px; }
+        #rawTranscript { margin-top: 8px; font-size: 13px; color: #ff9500; display: block; min-height: 15px; font-weight: bold;}
         #resultWord { font-size: 40px; font-weight: 800; margin: 15px 0; color: #1c1c1e; letter-spacing: 2px; }
         #meaning { font-size: 15px; color: #3a3a3c; min-height: 45px; background: #f2f2f7; padding: 12px; border-radius: 12px; line-height: 1.5;}
         
@@ -43,7 +43,7 @@
     <div class="card">
         <h2>
             🎙️ 按住读字母拼写
-            <span class="version-tag">v2.2.0-Stable</span>
+            <span class="version-tag">v2.3.0-Ultra</span>
         </h2>
         
         <div class="input-group">
@@ -82,20 +82,32 @@
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         let recognition = null;
         
-        // 核心锁机制
-        let isSystemBusy = false; // 系统是否正在录音或处理中
-        let isUserPressing = false; // 用户手指是否正按在按钮上
+        let isSystemBusy = false; 
+        let fallbackTimer = null; 
 
-        // 1. 按下按钮：开始录音
+        // 彻底清理旧实例，防止内存泄漏和重叠
+        function resetRecognition() {
+            if (recognition) {
+                recognition.onstart = null;
+                recognition.onresult = null;
+                recognition.onerror = null;
+                recognition.onend = null;
+                try { recognition.abort(); } catch(e){}
+                recognition = null;
+            }
+            clearTimeout(fallbackTimer);
+        }
+
+        // 1. 按下按钮：创建新通道，开始录音
         const startRecording = (e) => {
             e.preventDefault();
             
-            // 如果上一个词还在处理（麦克风通道未关闭），直接拦截操作，防止卡死
+            // 如果上一个词还在处理，忽略点击
             if (isSystemBusy) return; 
             
             isSystemBusy = true;
-            isUserPressing = true;
             rawTranscriptDisplay.innerText = "";
+            resetRecognition();
 
             if (!SpeechRecognition) {
                 statusText.innerText = "❌ 浏览器不支持语音识别。";
@@ -103,7 +115,6 @@
                 return;
             }
 
-            // 每次按下，必定创建一个崭新的实例
             recognition = new SpeechRecognition();
             recognition.lang = 'en-US'; 
             recognition.interimResults = false;
@@ -112,18 +123,20 @@
 
             recognition.onstart = () => {
                 recordBtn.classList.add('recording');
-                recordBtn.innerText = "🛑 正在聆听... (松开结束)";
-                statusText.innerText = "请读出字母 (例如读 'A P P L E')...";
+                recordBtn.innerText = "🛑 正在聆听... (请说完再松手)";
+                statusText.innerText = "请开始拼读字母...";
             };
 
             recognition.onresult = async (event) => {
+                clearTimeout(fallbackTimer); // 成功拿到结果，取消强杀定时器
+
                 const transcript = event.results[0][0].transcript;
-                rawTranscriptDisplay.innerText = `[底层听到]: "${transcript}"`;
+                rawTranscriptDisplay.innerText = `[苹果服务器返回]: "${transcript}"`;
                 
                 const word = transcript.replace(/[^a-zA-Z]/g, '').toLowerCase();
                 
                 if (!word) {
-                    statusText.innerText = "⚠️ 未识别出字母，请发音更清晰些。";
+                    statusText.innerText = "⚠️ 识别结果中不包含英文字母。";
                     return;
                 }
 
@@ -133,29 +146,30 @@
             };
 
             recognition.onerror = (event) => {
+                clearTimeout(fallbackTimer);
                 console.error("识别错误:", event.error);
                 const errorMap = {
                     'network': "网络不佳，无法连接苹果服务器。",
                     'not-allowed': "请在 Safari 设置中允许麦克风权限。",
-                    'no-speech': "没听到声音，请靠进麦克风。",
-                    'service-not-allowed': "请在【设置-通用-键盘-启用听写】中开启。",
-                    'aborted': "识别已取消。"
+                    'no-speech': "没听到声音，请大点声发音。",
+                    'service-not-allowed': "请在系统【设置-通用-键盘-启用听写】中开启。",
+                    'aborted': "识别被强制中断。"
                 };
-                statusText.innerText = "❌ " + (errorMap[event.error] || event.error);
+                statusText.innerText = "❌ 错误: " + (errorMap[event.error] || event.error);
             };
 
-            // onend 代表麦克风通道已经彻底关闭
             recognition.onend = () => {
-                isSystemBusy = false; // 彻底释放系统锁
+                clearTimeout(fallbackTimer);
+                isSystemBusy = false; // 彻底解除锁定
                 
-                // 恢复按钮初始状态
+                // 恢复按钮初始蓝色状态
                 recordBtn.classList.remove('busy');
                 recordBtn.classList.remove('recording');
                 recordBtn.innerText = "按住开始拼写字母";
 
-                // 如果松手后系统丢弃了音频（没触发 onresult），进行补救提示
-                if(statusText.innerText === "已松开，等待系统解析...") {
-                    statusText.innerText = "未捕捉到有效声音，请重试。";
+                // 如果松手后，苹果依然什么都没返回，给出精准提示
+                if(statusText.innerText === "已松开，等待苹果服务器回传数据...") {
+                    statusText.innerText = "⚠️ 服务器未返回数据，可能是读太快或网络卡顿，请重试。";
                 }
             };
 
@@ -167,34 +181,38 @@
             }
         };
 
-        // 2. 松开按钮：结束并等待结果
+        // 2. 松开手指：不立刻强杀，给服务器时间缓冲
         const stopRecording = (e) => {
             e.preventDefault();
-            if (!isUserPressing) return; // 防止多重事件重复触发
-            isUserPressing = false;
+            
+            if (!isSystemBusy) return; 
 
-            if (recognition && isSystemBusy) {
-                recognition.stop();
-                
-                // 松开手后，在 onend 触发前，按钮变成灰色锁定状态
-                recordBtn.classList.remove('recording');
-                recordBtn.classList.add('busy');
-                recordBtn.innerText = "⏳ 处理中...";
-                statusText.innerText = "已松开，等待系统解析...";
-            }
+            // 【核心修复】：不要在这里调用 recognition.stop()！
+            // 把按钮变成橘黄色，告诉用户正在处理中。
+            recordBtn.classList.remove('recording');
+            recordBtn.classList.add('busy');
+            recordBtn.innerText = "⏳ 接收结果中...";
+            statusText.innerText = "已松开，等待苹果服务器回传数据...";
+
+            // 保护机制：给苹果服务器最多 2.5 秒钟。
+            // 2.5 秒后如果还没出结果，为了防止卡死，再手动强杀。
+            fallbackTimer = setTimeout(() => {
+                if (isSystemBusy && recognition) {
+                    try { recognition.stop(); } catch(err) {}
+                }
+            }, 2500); 
         };
 
-        // 绑定事件（兼容触摸屏和鼠标）
+        // 绑定事件
         recordBtn.addEventListener('mousedown', startRecording);
         recordBtn.addEventListener('touchstart', startRecording, {passive: false});
         
-        // 松开、移出按钮、系统打断，都触发结束
         recordBtn.addEventListener('mouseup', stopRecording);
         recordBtn.addEventListener('touchend', stopRecording);
         recordBtn.addEventListener('mouseleave', stopRecording);
         recordBtn.addEventListener('touchcancel', stopRecording);
 
-        // 处理单词和缓存逻辑（保持不变）
+        // 处理单词和缓存逻辑
         async function processWord(word) {
             let meaning = "暂无释义。";
             try {
@@ -208,7 +226,7 @@
                 }
             } catch (error) {
                 meaning = "网络错误，查词失败。";
-                statusText.innerText = "❌ 查词请求失败";
+                statusText.innerText = "❌ 查词网络异常";
             }
 
             meaningDisplay.innerText = meaning;
