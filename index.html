@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>语音拼写生词本 v2.3.0</title>
+    <title>语音拼写生词本 v2.4.0</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; background: #f4f7f6; color: #333; }
         .card { background: white; padding: 25px 20px; border-radius: 16px; box-shadow: 0 8px 20px rgba(0,0,0,0.06); margin-bottom: 20px; text-align: center; }
@@ -12,9 +12,7 @@
         
         #recordBtn { background: #007aff; color: white; border: none; padding: 18px 30px; font-size: 18px; font-weight: 600; border-radius: 50px; cursor: pointer; user-select: none; transition: all 0.2s; width: 100%; box-shadow: 0 4px 12px rgba(0,122,255,0.3); -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;}
         
-        /* 按下录音时的状态 */
         #recordBtn.recording { background: #ff3b30; box-shadow: 0 4px 12px rgba(255,59,48,0.4); transform: scale(0.96); }
-        /* 松开手，等待苹果服务器时的缓冲状态 */
         #recordBtn.busy { background: #ff9500; box-shadow: 0 4px 12px rgba(255,149,0,0.4); pointer-events: none; transform: none; }
 
         #exportBtn { background: #34c759; color: white; border: none; padding: 8px 15px; font-size: 14px; font-weight: 600; border-radius: 8px; cursor: pointer; transition: opacity 0.2s; }
@@ -32,10 +30,17 @@
         .word-list { text-align: left; }
         .archive-group { margin-top: 20px; }
         .archive-header { background: #f2f2f7; padding: 10px 15px; border-radius: 10px; font-weight: 700; font-size: 15px; color: #1c1c1e; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;}
-        .word-item { padding: 12px 10px; border-bottom: 1px solid #e5e5ea; display: flex; flex-direction: column;}
+        
+        /* 优化了单词列表的排版，采用左右结构容纳删除按钮 */
+        .word-item { padding: 12px 10px; border-bottom: 1px solid #e5e5ea; display: flex; justify-content: space-between; align-items: center;}
         .word-item:last-child { border-bottom: none; }
+        .word-content { display: flex; flex-direction: column; flex: 1; margin-right: 10px; }
         .word-word { font-size: 18px; font-weight: 700; color: #007aff; }
-        .word-meaning { font-size: 14px; color: #636366; margin-top: 6px; }
+        .word-meaning { font-size: 14px; color: #636366; margin-top: 6px; line-height: 1.4; }
+        
+        /* 删除按钮样式 */
+        .delete-btn { background: none; border: none; font-size: 18px; cursor: pointer; padding: 8px; border-radius: 8px; transition: background 0.2s; -webkit-tap-highlight-color: transparent; }
+        .delete-btn:active { background: #ffe5e5; }
     </style>
 </head>
 <body>
@@ -43,7 +48,7 @@
     <div class="card">
         <h2>
             🎙️ 按住读字母拼写
-            <span class="version-tag">v2.3.0-Ultra</span>
+            <span class="version-tag">v2.4.0-Ultra</span>
         </h2>
         
         <div class="input-group">
@@ -102,7 +107,6 @@
         const startRecording = (e) => {
             e.preventDefault();
             
-            // 如果上一个词还在处理，忽略点击
             if (isSystemBusy) return; 
             
             isSystemBusy = true;
@@ -128,7 +132,7 @@
             };
 
             recognition.onresult = async (event) => {
-                clearTimeout(fallbackTimer); // 成功拿到结果，取消强杀定时器
+                clearTimeout(fallbackTimer); 
 
                 const transcript = event.results[0][0].transcript;
                 rawTranscriptDisplay.innerText = `[苹果服务器返回]: "${transcript}"`;
@@ -160,14 +164,12 @@
 
             recognition.onend = () => {
                 clearTimeout(fallbackTimer);
-                isSystemBusy = false; // 彻底解除锁定
+                isSystemBusy = false; 
                 
-                // 恢复按钮初始蓝色状态
                 recordBtn.classList.remove('busy');
                 recordBtn.classList.remove('recording');
                 recordBtn.innerText = "按住开始拼写字母";
 
-                // 如果松手后，苹果依然什么都没返回，给出精准提示
                 if(statusText.innerText === "已松开，等待苹果服务器回传数据...") {
                     statusText.innerText = "⚠️ 服务器未返回数据，可能是读太快或网络卡顿，请重试。";
                 }
@@ -187,15 +189,11 @@
             
             if (!isSystemBusy) return; 
 
-            // 【核心修复】：不要在这里调用 recognition.stop()！
-            // 把按钮变成橘黄色，告诉用户正在处理中。
             recordBtn.classList.remove('recording');
             recordBtn.classList.add('busy');
             recordBtn.innerText = "⏳ 接收结果中...";
             statusText.innerText = "已松开，等待苹果服务器回传数据...";
 
-            // 保护机制：给苹果服务器最多 2.5 秒钟。
-            // 2.5 秒后如果还没出结果，为了防止卡死，再手动强杀。
             fallbackTimer = setTimeout(() => {
                 if (isSystemBusy && recognition) {
                     try { recognition.stop(); } catch(err) {}
@@ -245,6 +243,25 @@
             }
         }
 
+        // ======= 新增：删除单词的核心逻辑 =======
+        function deleteWord(archive, word) {
+            let vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
+            
+            if (vocabData[archive]) {
+                // 过滤掉选中的那个词
+                vocabData[archive] = vocabData[archive].filter(item => item.word !== word);
+                
+                // 如果这个归档下的所有词都被删光了，直接清理掉这个归档
+                if (vocabData[archive].length === 0) {
+                    delete vocabData[archive];
+                }
+                
+                // 重新保存回本地存储并刷新列表
+                localStorage.setItem('myVocabBook', JSON.stringify(vocabData));
+                renderVocabList();
+            }
+        }
+
         function renderVocabList() {
             const vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
             vocabListDisplay.innerHTML = '';
@@ -255,10 +272,29 @@
                 header.className = 'archive-header';
                 header.innerHTML = `<span>📂 ${archive}</span> <span style="font-size: 13px; color: #8e8e93; font-weight: normal;">${vocabData[archive].length} 词</span>`;
                 groupDiv.appendChild(header);
+                
                 vocabData[archive].forEach(item => {
                     const wordDiv = document.createElement('div');
                     wordDiv.className = 'word-item';
-                    wordDiv.innerHTML = `<span class="word-word">${item.word}</span><span class="word-meaning">${item.meaning}</span>`;
+                    
+                    // 单词和意思容器
+                    const contentDiv = document.createElement('div');
+                    contentDiv.className = 'word-content';
+                    contentDiv.innerHTML = `<span class="word-word">${item.word}</span><span class="word-meaning">${item.meaning}</span>`;
+                    
+                    // ======= 新增：删除按钮 DOM 结构 =======
+                    const delBtn = document.createElement('button');
+                    delBtn.className = 'delete-btn';
+                    delBtn.innerHTML = '🗑️';
+                    delBtn.onclick = () => {
+                        // 弹出防误触的确认框
+                        if(confirm(`确定要从生词本中删除单词 "${item.word}" 吗？`)) {
+                            deleteWord(archive, item.word);
+                        }
+                    };
+                    
+                    wordDiv.appendChild(contentDiv);
+                    wordDiv.appendChild(delBtn);
                     groupDiv.appendChild(wordDiv);
                 });
                 vocabListDisplay.appendChild(groupDiv);
