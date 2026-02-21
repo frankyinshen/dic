@@ -3,48 +3,52 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>语音拼写生词本1</title>
+    <title>语音拼写生词本 v2.1.0</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; background: #f4f7f6; color: #333; }
-        .card { background: white; padding: 25px 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 20px; text-align: center; }
-        h2 { margin-top: 0; font-size: 20px; color: #2c3e50; display: flex; justify-content: space-between; align-items: center;}
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; background: #f4f7f6; color: #333; }
+        .card { background: white; padding: 25px 20px; border-radius: 16px; box-shadow: 0 8px 20px rgba(0,0,0,0.06); margin-bottom: 20px; text-align: center; }
+        h2 { margin-top: 0; font-size: 20px; color: #1c1c1e; display: flex; justify-content: space-between; align-items: center;}
+        .version-tag { font-size: 12px; background: #e0e0e0; padding: 2px 8px; border-radius: 10px; color: #555; font-weight: normal; }
         
-        #recordBtn { background: #007bff; color: white; border: none; padding: 15px 30px; font-size: 18px; border-radius: 50px; cursor: pointer; user-select: none; transition: all 0.2s; width: 100%; box-shadow: 0 4px 6px rgba(0,123,255,0.3); -webkit-touch-callout: none; }
-        /* 修改了按钮点击状态的效果 */
-        #recordBtn:active { transform: translateY(2px); }
-        #recordBtn.recording { background: #dc3545; box-shadow: 0 2px 4px rgba(220,53,69,0.3); animation: pulse 1.5s infinite; }
+        #recordBtn { background: #007aff; color: white; border: none; padding: 16px 30px; font-size: 18px; font-weight: 600; border-radius: 50px; cursor: pointer; user-select: none; transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1); width: 100%; box-shadow: 0 4px 12px rgba(0,122,255,0.3); -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;}
+        #recordBtn:active { transform: scale(0.96); }
+        #recordBtn.recording { background: #ff3b30; box-shadow: 0 4px 12px rgba(255,59,48,0.4); animation: pulse 1.5s infinite; }
         
         @keyframes pulse {
-            0% { box-shadow: 0 0 0 0 rgba(220,53,69, 0.4); }
-            70% { box-shadow: 0 0 0 10px rgba(220,53,69, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(220,53,69, 0); }
+            0% { box-shadow: 0 0 0 0 rgba(255,59,48, 0.4); }
+            70% { box-shadow: 0 0 0 12px rgba(255,59,48, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255,59,48, 0); }
         }
 
-        #exportBtn { background: #28a745; color: white; border: none; padding: 8px 15px; font-size: 14px; border-radius: 6px; cursor: pointer; transition: background 0.2s; }
-        #exportBtn:hover { background: #218838; }
+        #exportBtn { background: #34c759; color: white; border: none; padding: 8px 15px; font-size: 14px; font-weight: 600; border-radius: 8px; cursor: pointer; transition: opacity 0.2s; }
+        #exportBtn:active { opacity: 0.7; }
 
-        .status { margin-top: 15px; font-size: 14px; color: #888; height: 20px; }
-        #resultWord { font-size: 36px; font-weight: bold; margin: 15px 0; color: #2c3e50; letter-spacing: 2px; }
-        #meaning { font-size: 15px; color: #555; min-height: 45px; background: #f8f9fa; padding: 10px; border-radius: 8px; }
+        .status { margin-top: 15px; font-size: 14px; color: #8e8e93; min-height: 20px; font-weight: 500; }
+        #rawTranscript { margin-top: 8px; font-size: 13px; color: #d09a00; display: block; min-height: 15px; }
+        #resultWord { font-size: 40px; font-weight: 800; margin: 15px 0; color: #1c1c1e; letter-spacing: 2px; }
+        #meaning { font-size: 15px; color: #3a3a3c; min-height: 45px; background: #f2f2f7; padding: 12px; border-radius: 12px; line-height: 1.5;}
         
-        .input-group { text-align: left; margin-bottom: 15px; }
-        label { font-size: 14px; font-weight: bold; color: #555; display: block; margin-bottom: 5px; }
-        input[type="text"] { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 16px; }
+        .input-group { text-align: left; margin-bottom: 20px; }
+        label { font-size: 14px; font-weight: 600; color: #636366; display: block; margin-bottom: 8px; }
+        input[type="text"] { width: 100%; padding: 12px; border: 1px solid #d1d1d6; border-radius: 10px; box-sizing: border-box; font-size: 16px; transition: border-color 0.2s; outline: none; }
+        input[type="text"]:focus { border-color: #007aff; }
         
         .word-list { text-align: left; }
         .archive-group { margin-top: 20px; }
-        .archive-header { background: #e9ecef; padding: 8px 12px; border-radius: 6px; font-weight: bold; font-size: 14px; color: #495057; display: flex; justify-content: space-between; }
-        .word-item { padding: 12px 10px; border-bottom: 1px solid #eee; }
+        .archive-header { background: #f2f2f7; padding: 10px 15px; border-radius: 10px; font-weight: 700; font-size: 15px; color: #1c1c1e; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;}
+        .word-item { padding: 12px 10px; border-bottom: 1px solid #e5e5ea; display: flex; flex-direction: column;}
         .word-item:last-child { border-bottom: none; }
-        .word-word { font-size: 18px; font-weight: bold; color: #007bff; }
-        .word-meaning { font-size: 14px; color: #666; margin-top: 4px; display: block; }
+        .word-word { font-size: 18px; font-weight: 700; color: #007aff; }
+        .word-meaning { font-size: 14px; color: #636366; margin-top: 6px; }
     </style>
 </head>
 <body>
 
     <div class="card">
-        <!-- 标题也改成了点击 -->
-        <h2>🎙️ 点击读字母拼写1</h2>
+        <h2>
+            🎙️ 点击读字母拼写
+            <span class="version-tag">v2.1.0-Pro</span>
+        </h2>
         
         <div class="input-group">
             <label for="archiveName">归档名称 (可修改为书名/章节):</label>
@@ -53,6 +57,8 @@
 
         <button id="recordBtn">🎙️ 点击开始拼写字母</button>
         <div class="status" id="statusText">准备就绪...</div>
+        <!-- 增加一个调试层，显示真正听到的内容 -->
+        <div id="rawTranscript"></div>
         
         <div id="resultWord">...</div>
         <div id="meaning">等待查词...</div>
@@ -74,6 +80,7 @@
         const recordBtn = document.getElementById('recordBtn');
         const exportBtn = document.getElementById('exportBtn');
         const statusText = document.getElementById('statusText');
+        const rawTranscriptDisplay = document.getElementById('rawTranscript');
         const resultWordDisplay = document.getElementById('resultWord');
         const meaningDisplay = document.getElementById('meaning');
         const vocabListDisplay = document.getElementById('vocabList');
@@ -82,104 +89,144 @@
         let recognition = null;
         let isRecording = false;
 
-        // 核心修复：将识别逻辑封装成函数，每次点击都创建一个【全新】的识别实例
-        function startRecognition() {
-            if (!SpeechRecognition) {
-                statusText.innerText = "你的浏览器不支持语音识别，请使用 Safari 或 Chrome。";
+        // 【核心修复 1】彻底杀掉僵尸实例，防止 iOS Safari 麦克风通道堵塞
+        function killZombieRecognition() {
+            if (recognition) {
+                // 1. 摘除所有事件钩子，防止旧实例触发回调导致状态混乱
+                recognition.onstart = null;
+                recognition.onresult = null;
+                recognition.onerror = null;
+                recognition.onend = null;
+                recognition.onspeechend = null;
+                // 2. 强行终止
+                try { recognition.abort(); } catch (e) {}
+                // 3. 内存回收
+                recognition = null;
+            }
+        }
+
+        // 切换录音状态
+        function toggleRecording(e) {
+            e.preventDefault();
+
+            // 如果正在录音，点击则手动停止并开始解析（适配iOS有时等不到静音的情况）
+            if (isRecording && recognition) {
+                try { recognition.stop(); } catch (e) {}
+                isRecording = false;
+                recordBtn.classList.remove('recording');
+                recordBtn.innerText = "🎙️ 点击开始拼写字母";
+                statusText.innerText = "已手动结束，处理中...";
                 return;
             }
 
-            // 每次重新实例化，解决 iOS Safari 连续识别卡死的问题
+            // 【开始全新录音】
+            if (!SpeechRecognition) {
+                statusText.innerText = "❌ 你的浏览器不支持，请使用 Safari 或 Chrome。";
+                return;
+            }
+
+            // 每次启动前先清场
+            killZombieRecognition();
+            rawTranscriptDisplay.innerText = ""; // 清空上次的调试记录
+
+            // 创建纯净的新实例
             recognition = new SpeechRecognition();
             recognition.lang = 'en-US'; 
             recognition.interimResults = false;
             recognition.maxAlternatives = 1;
-            recognition.continuous = false; // iOS 下强烈建议设为 false，识别完一次自动停
+            recognition.continuous = false; // iOS 必须设为 false，否则容易崩溃
 
             recognition.onstart = () => {
                 isRecording = true;
                 recordBtn.classList.add('recording');
-                recordBtn.innerText = "🛑 正在聆听... 点击结束";
+                recordBtn.innerText = "🛑 正在聆听... (说完可再点一次结束)";
                 statusText.innerText = "请读出字母 (例如读 'A P P L E')...";
+            };
+
+            // 当系统检测到你停止说话
+            recognition.onspeechend = () => {
+                statusText.innerText = "检测到停顿，正在向 Apple 服务器请求结果...";
             };
 
             recognition.onresult = async (event) => {
                 const transcript = event.results[0][0].transcript;
-                // 使用更严谨的正侧表达式：去掉空格和可能识别出来的标点符号，只保留纯字母
+                
+                // 【核心修复 2】把原始识别结果显示出来，方便诊断问题
+                rawTranscriptDisplay.innerText = `[底层听到内容]: "${transcript}"`;
+                
+                // 去掉空格和标点符号，只保留纯字母
                 const word = transcript.replace(/[^a-zA-Z]/g, '').toLowerCase();
                 
+                if (!word) {
+                    statusText.innerText = "⚠️ 警告：未识别出任何英文字母。";
+                    resultWordDisplay.innerText = "未识别";
+                    meaningDisplay.innerText = "请检查刚才【底层听到内容】中是否包含字母，可以试着发音更干脆一些。";
+                    return;
+                }
+
                 resultWordDisplay.innerText = word;
-                statusText.innerText = "正在查询意思...";
+                statusText.innerText = "正在查询字典...";
                 meaningDisplay.innerText = "查询中...";
 
                 await processWord(word);
             };
 
             recognition.onerror = (event) => {
-                console.error("识别错误:", event.error);
-                if (event.error === 'service-not-allowed') {
-                    statusText.innerText = "识别出错。请确保在设置中开启了【启用听写】。";
-                } else if (event.error === 'not-allowed') {
-                    statusText.innerText = "未获得麦克风权限。";
-                } else if (event.error === 'no-speech') {
-                    statusText.innerText = "未听到声音，请重试。";
-                } else {
-                    statusText.innerText = "识别出错: " + event.error + "。请再试一次。";
-                }
+                console.error("底层识别错误代码:", event.error);
+                
+                // 友好的中文错误提示映射
+                const errorMap = {
+                    'network': "网络不佳：无法连接到 Apple 听写服务器。",
+                    'not-allowed': "权限拒绝：请在 Safari 设置中允许麦克风权限。",
+                    'no-speech': "静音超时：没听到声音，请大点声或靠进麦克风。",
+                    'service-not-allowed': "服务禁用：请在【设置-通用-键盘-启用听写】中开启。",
+                    'aborted': "识别被意外终止。"
+                };
+                
+                statusText.innerText = "❌ 错误: " + (errorMap[event.error] || event.error);
             };
 
             recognition.onend = () => {
                 isRecording = false;
                 recordBtn.classList.remove('recording');
                 recordBtn.innerText = "🎙️ 点击开始拼写字母";
-                // 只有在没有进入查询流程时，才将状态重置
-                if(statusText.innerText.includes("请读出字母")) {
-                    statusText.innerText = "识别已结束。";
+                // 如果没有触发 onresult 直接结束了（通常是因为没说话或全背景噪音）
+                if(statusText.innerText.includes("请读出字母") || statusText.innerText.includes("检测到停顿")) {
+                    statusText.innerText = "识别自动结束 (未捕捉到有效声音)。";
                 }
             };
 
             try {
                 recognition.start();
             } catch (err) {
-                console.error(err);
+                console.error("唤醒麦克风异常:", err);
                 isRecording = false;
-                statusText.innerText = "启动麦克风失败，请重试。";
+                statusText.innerText = "❌ 启动麦克风失败，请尝试刷新网页。";
+                killZombieRecognition();
             }
         }
 
-        // 修改交互逻辑为：点击开关
-        recordBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            if (isRecording && recognition) {
-                recognition.stop(); // 如果正在录音，点击则强制结束并识别
-            } else {
-                startRecognition(); // 如果没录音，点击则开始
-            }
-        });
+        // 绑定点击事件 (iOS 下单纯的 click 比 mousedown/touchstart 兼容性更好)
+        recordBtn.addEventListener('click', toggleRecording);
 
         // 处理单词：查询释义并保存
         async function processWord(word) {
-            if (!word || !/^[a-z]+$/.test(word)) {
-                meaningDisplay.innerText = "未识别出纯字母构成的单词，请重试。";
-                statusText.innerText = "识别失败";
-                return;
-            }
-
             let meaning = "暂无释义，可能拼写有误或字典未收录。";
             
             try {
+                // 使用公共免费字典 API
                 const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
                 if (response.ok) {
                     const data = await response.json();
                     meaning = data[0].meanings[0].definitions[0].definition;
-                    statusText.innerText = "查询成功！";
+                    statusText.innerText = "✅ 查询成功！";
                 } else {
-                    statusText.innerText = "字典未收录该词";
+                    statusText.innerText = "⚠️ 字典中未找到该词。";
                 }
             } catch (error) {
-                console.error(error);
-                meaning = "网络错误，无法获取释义。";
-                statusText.innerText = "查询出错";
+                console.error("查词网络错误:", error);
+                meaning = "网络错误，无法连接到字典服务器获取释义。";
+                statusText.innerText = "❌ 查词请求失败";
             }
 
             meaningDisplay.innerText = meaning;
@@ -196,6 +243,7 @@
                 vocabData[archiveName] = [];
             }
             
+            // 查重并插入最前面
             const exists = vocabData[archiveName].find(w => w.word === word);
             if (!exists) {
                 vocabData[archiveName].unshift({ word, meaning });
@@ -214,7 +262,7 @@
                 
                 const header = document.createElement('div');
                 header.className = 'archive-header';
-                header.innerHTML = `<span>📂 ${archive}</span> <span>${vocabData[archive].length} 词</span>`;
+                header.innerHTML = `<span>📂 ${archive}</span> <span style="font-size: 13px; color: #8e8e93; font-weight: normal;">${vocabData[archive].length} 词</span>`;
                 groupDiv.appendChild(header);
 
                 vocabData[archive].forEach(item => {
