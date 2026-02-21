@@ -10,8 +10,16 @@
         h2 { margin-top: 0; font-size: 20px; color: #2c3e50; display: flex; justify-content: space-between; align-items: center;}
         
         #recordBtn { background: #007bff; color: white; border: none; padding: 15px 30px; font-size: 18px; border-radius: 50px; cursor: pointer; user-select: none; transition: all 0.2s; width: 100%; box-shadow: 0 4px 6px rgba(0,123,255,0.3); -webkit-touch-callout: none; }
-        #recordBtn:active, #recordBtn.recording { background: #dc3545; box-shadow: 0 2px 4px rgba(220,53,69,0.3); transform: translateY(2px); }
+        /* 修改了按钮点击状态的效果 */
+        #recordBtn:active { transform: translateY(2px); }
+        #recordBtn.recording { background: #dc3545; box-shadow: 0 2px 4px rgba(220,53,69,0.3); animation: pulse 1.5s infinite; }
         
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(220,53,69, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(220,53,69, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(220,53,69, 0); }
+        }
+
         #exportBtn { background: #28a745; color: white; border: none; padding: 8px 15px; font-size: 14px; border-radius: 6px; cursor: pointer; transition: background 0.2s; }
         #exportBtn:hover { background: #218838; }
 
@@ -35,14 +43,15 @@
 <body>
 
     <div class="card">
-        <h2>🎙️ 按住读字母拼写</h2>
+        <!-- 标题也改成了点击 -->
+        <h2>🎙️ 点击读字母拼写</h2>
         
         <div class="input-group">
             <label for="archiveName">归档名称 (可修改为书名/章节):</label>
             <input type="text" id="archiveName" placeholder="例如: 2026-02-20 或 简爱-第一章">
         </div>
 
-        <button id="recordBtn">按住开始拼写字母</button>
+        <button id="recordBtn">🎙️ 点击开始拼写字母</button>
         <div class="status" id="statusText">准备就绪...</div>
         
         <div id="resultWord">...</div>
@@ -69,23 +78,35 @@
         const meaningDisplay = document.getElementById('meaning');
         const vocabListDisplay = document.getElementById('vocabList');
 
-        // 初始化语音识别 (使用英文识别以确保字母准确度)
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        let recognition;
-        
-        if (SpeechRecognition) {
+        let recognition = null;
+        let isRecording = false;
+
+        // 核心修复：将识别逻辑封装成函数，每次点击都创建一个【全新】的识别实例
+        function startRecognition() {
+            if (!SpeechRecognition) {
+                statusText.innerText = "你的浏览器不支持语音识别，请使用 Safari 或 Chrome。";
+                return;
+            }
+
+            // 每次重新实例化，解决 iOS Safari 连续识别卡死的问题
             recognition = new SpeechRecognition();
             recognition.lang = 'en-US'; 
             recognition.interimResults = false;
             recognition.maxAlternatives = 1;
+            recognition.continuous = false; // iOS 下强烈建议设为 false，识别完一次自动停
 
             recognition.onstart = () => {
-                statusText.innerText = "正在聆听字母 (例如读 'A P P L E')...";
+                isRecording = true;
+                recordBtn.classList.add('recording');
+                recordBtn.innerText = "🛑 正在聆听... 点击结束";
+                statusText.innerText = "请读出字母 (例如读 'A P P L E')...";
             };
 
             recognition.onresult = async (event) => {
                 const transcript = event.results[0][0].transcript;
-                const word = transcript.replace(/\s+/g, '').toLowerCase();
+                // 使用更严谨的正侧表达式：去掉空格和可能识别出来的标点符号，只保留纯字母
+                const word = transcript.replace(/[^a-zA-Z]/g, '').toLowerCase();
                 
                 resultWordDisplay.innerText = word;
                 statusText.innerText = "正在查询意思...";
@@ -95,41 +116,52 @@
             };
 
             recognition.onerror = (event) => {
-                statusText.innerText = "识别出错: " + event.error + "。请再试一次。";
+                console.error("识别错误:", event.error);
+                if (event.error === 'service-not-allowed') {
+                    statusText.innerText = "识别出错。请确保在设置中开启了【启用听写】。";
+                } else if (event.error === 'not-allowed') {
+                    statusText.innerText = "未获得麦克风权限。";
+                } else if (event.error === 'no-speech') {
+                    statusText.innerText = "未听到声音，请重试。";
+                } else {
+                    statusText.innerText = "识别出错: " + event.error + "。请再试一次。";
+                }
             };
 
             recognition.onend = () => {
+                isRecording = false;
                 recordBtn.classList.remove('recording');
-                recordBtn.innerText = "按住开始拼写字母";
+                recordBtn.innerText = "🎙️ 点击开始拼写字母";
+                // 只有在没有进入查询流程时，才将状态重置
+                if(statusText.innerText.includes("请读出字母")) {
+                    statusText.innerText = "识别已结束。";
+                }
             };
-        } else {
-            statusText.innerText = "你的浏览器不支持语音识别，请使用Chrome或Edge。";
-            recordBtn.disabled = true;
+
+            try {
+                recognition.start();
+            } catch (err) {
+                console.error(err);
+                isRecording = false;
+                statusText.innerText = "启动麦克风失败，请重试。";
+            }
         }
 
-        const startRecording = (e) => {
+        // 修改交互逻辑为：点击开关
+        recordBtn.addEventListener('click', (e) => {
             e.preventDefault();
-            if(!recognition) return;
-            recordBtn.classList.add('recording');
-            recordBtn.innerText = "松开结束并确认...";
-            recognition.start();
-        };
-
-        const stopRecording = (e) => {
-            e.preventDefault();
-            if(!recognition) return;
-            recognition.stop();
-        };
-
-        recordBtn.addEventListener('mousedown', startRecording);
-        recordBtn.addEventListener('mouseup', stopRecording);
-        recordBtn.addEventListener('touchstart', startRecording);
-        recordBtn.addEventListener('touchend', stopRecording);
+            if (isRecording && recognition) {
+                recognition.stop(); // 如果正在录音，点击则强制结束并识别
+            } else {
+                startRecognition(); // 如果没录音，点击则开始
+            }
+        });
 
         // 处理单词：查询释义并保存
         async function processWord(word) {
-            if (!/^[a-z]+$/.test(word)) {
-                meaningDisplay.innerText = "未识别出纯字母构成的单词，请确保读音清晰。";
+            if (!word || !/^[a-z]+$/.test(word)) {
+                meaningDisplay.innerText = "未识别出纯字母构成的单词，请重试。";
+                statusText.innerText = "识别失败";
                 return;
             }
 
@@ -140,10 +172,14 @@
                 if (response.ok) {
                     const data = await response.json();
                     meaning = data[0].meanings[0].definitions[0].definition;
+                    statusText.innerText = "查询成功！";
+                } else {
+                    statusText.innerText = "字典未收录该词";
                 }
             } catch (error) {
                 console.error(error);
                 meaning = "网络错误，无法获取释义。";
+                statusText.innerText = "查询出错";
             }
 
             meaningDisplay.innerText = meaning;
@@ -203,18 +239,15 @@
                 return;
             }
 
-            // 添加 BOM 头部，防止 Excel 打开时中文乱码
             let csvContent = "\uFEFF归档名称,单词,释义\n";
 
             for (const archive in vocabData) {
                 vocabData[archive].forEach(item => {
-                    // 处理释义中可能包含的双引号，并用双引号包裹每个字段，防止逗号破坏格式
                     let safeMeaning = item.meaning.replace(/"/g, '""');
                     csvContent += `"${archive}","${item.word}","${safeMeaning}"\n`;
                 });
             }
 
-            // 创建 Blob 并触发下载
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement("a");
