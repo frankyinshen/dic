@@ -2,23 +2,20 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>语音拼写生词本 v2.1.0</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>语音拼写生词本 v2.2.0</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; background: #f4f7f6; color: #333; }
         .card { background: white; padding: 25px 20px; border-radius: 16px; box-shadow: 0 8px 20px rgba(0,0,0,0.06); margin-bottom: 20px; text-align: center; }
         h2 { margin-top: 0; font-size: 20px; color: #1c1c1e; display: flex; justify-content: space-between; align-items: center;}
-        .version-tag { font-size: 12px; background: #e0e0e0; padding: 2px 8px; border-radius: 10px; color: #555; font-weight: normal; }
+        .version-tag { font-size: 12px; background: #34c759; padding: 2px 8px; border-radius: 10px; color: white; font-weight: bold; }
         
-        #recordBtn { background: #007aff; color: white; border: none; padding: 16px 30px; font-size: 18px; font-weight: 600; border-radius: 50px; cursor: pointer; user-select: none; transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1); width: 100%; box-shadow: 0 4px 12px rgba(0,122,255,0.3); -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;}
-        #recordBtn:active { transform: scale(0.96); }
-        #recordBtn.recording { background: #ff3b30; box-shadow: 0 4px 12px rgba(255,59,48,0.4); animation: pulse 1.5s infinite; }
+        #recordBtn { background: #007aff; color: white; border: none; padding: 16px 30px; font-size: 18px; font-weight: 600; border-radius: 50px; cursor: pointer; user-select: none; transition: all 0.2s; width: 100%; box-shadow: 0 4px 12px rgba(0,122,255,0.3); -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;}
         
-        @keyframes pulse {
-            0% { box-shadow: 0 0 0 0 rgba(255,59,48, 0.4); }
-            70% { box-shadow: 0 0 0 12px rgba(255,59,48, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(255,59,48, 0); }
-        }
+        /* 按下时的状态 */
+        #recordBtn.recording { background: #ff3b30; box-shadow: 0 4px 12px rgba(255,59,48,0.4); transform: scale(0.96); }
+        /* 锁定处理时的状态 */
+        #recordBtn.busy { background: #8e8e93; box-shadow: none; transform: none; pointer-events: none; }
 
         #exportBtn { background: #34c759; color: white; border: none; padding: 8px 15px; font-size: 14px; font-weight: 600; border-radius: 8px; cursor: pointer; transition: opacity 0.2s; }
         #exportBtn:active { opacity: 0.7; }
@@ -30,8 +27,7 @@
         
         .input-group { text-align: left; margin-bottom: 20px; }
         label { font-size: 14px; font-weight: 600; color: #636366; display: block; margin-bottom: 8px; }
-        input[type="text"] { width: 100%; padding: 12px; border: 1px solid #d1d1d6; border-radius: 10px; box-sizing: border-box; font-size: 16px; transition: border-color 0.2s; outline: none; }
-        input[type="text"]:focus { border-color: #007aff; }
+        input[type="text"] { width: 100%; padding: 12px; border: 1px solid #d1d1d6; border-radius: 10px; box-sizing: border-box; font-size: 16px; outline: none; }
         
         .word-list { text-align: left; }
         .archive-group { margin-top: 20px; }
@@ -46,8 +42,8 @@
 
     <div class="card">
         <h2>
-            🎙️ 点击读字母拼写
-            <span class="version-tag">v2.1.0-Pro</span>
+            🎙️ 按住读字母拼写
+            <span class="version-tag">v2.2.0-Stable</span>
         </h2>
         
         <div class="input-group">
@@ -55,9 +51,8 @@
             <input type="text" id="archiveName" placeholder="例如: 2026-02-20 或 简爱-第一章">
         </div>
 
-        <button id="recordBtn">🎙️ 点击开始拼写字母</button>
+        <button id="recordBtn">按住开始拼写字母</button>
         <div class="status" id="statusText">准备就绪...</div>
-        <!-- 增加一个调试层，显示真正听到的内容 -->
         <div id="rawTranscript"></div>
         
         <div id="resultWord">...</div>
@@ -73,7 +68,6 @@
     </div>
 
     <script>
-        // 初始化日期作为默认归档名
         const today = new Date().toISOString().split('T')[0];
         document.getElementById('archiveName').value = today;
 
@@ -87,134 +81,123 @@
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         let recognition = null;
-        let isRecording = false;
+        
+        // 核心锁机制
+        let isSystemBusy = false; // 系统是否正在录音或处理中
+        let isUserPressing = false; // 用户手指是否正按在按钮上
 
-        // 【核心修复 1】彻底杀掉僵尸实例，防止 iOS Safari 麦克风通道堵塞
-        function killZombieRecognition() {
-            if (recognition) {
-                // 1. 摘除所有事件钩子，防止旧实例触发回调导致状态混乱
-                recognition.onstart = null;
-                recognition.onresult = null;
-                recognition.onerror = null;
-                recognition.onend = null;
-                recognition.onspeechend = null;
-                // 2. 强行终止
-                try { recognition.abort(); } catch (e) {}
-                // 3. 内存回收
-                recognition = null;
-            }
-        }
-
-        // 切换录音状态
-        function toggleRecording(e) {
+        // 1. 按下按钮：开始录音
+        const startRecording = (e) => {
             e.preventDefault();
+            
+            // 如果上一个词还在处理（麦克风通道未关闭），直接拦截操作，防止卡死
+            if (isSystemBusy) return; 
+            
+            isSystemBusy = true;
+            isUserPressing = true;
+            rawTranscriptDisplay.innerText = "";
 
-            // 如果正在录音，点击则手动停止并开始解析（适配iOS有时等不到静音的情况）
-            if (isRecording && recognition) {
-                try { recognition.stop(); } catch (e) {}
-                isRecording = false;
-                recordBtn.classList.remove('recording');
-                recordBtn.innerText = "🎙️ 点击开始拼写字母";
-                statusText.innerText = "已手动结束，处理中...";
-                return;
-            }
-
-            // 【开始全新录音】
             if (!SpeechRecognition) {
-                statusText.innerText = "❌ 你的浏览器不支持，请使用 Safari 或 Chrome。";
+                statusText.innerText = "❌ 浏览器不支持语音识别。";
+                isSystemBusy = false;
                 return;
             }
 
-            // 每次启动前先清场
-            killZombieRecognition();
-            rawTranscriptDisplay.innerText = ""; // 清空上次的调试记录
-
-            // 创建纯净的新实例
+            // 每次按下，必定创建一个崭新的实例
             recognition = new SpeechRecognition();
             recognition.lang = 'en-US'; 
             recognition.interimResults = false;
             recognition.maxAlternatives = 1;
-            recognition.continuous = false; // iOS 必须设为 false，否则容易崩溃
+            recognition.continuous = false;
 
             recognition.onstart = () => {
-                isRecording = true;
                 recordBtn.classList.add('recording');
-                recordBtn.innerText = "🛑 正在聆听... (说完可再点一次结束)";
+                recordBtn.innerText = "🛑 正在聆听... (松开结束)";
                 statusText.innerText = "请读出字母 (例如读 'A P P L E')...";
-            };
-
-            // 当系统检测到你停止说话
-            recognition.onspeechend = () => {
-                statusText.innerText = "检测到停顿，正在向 Apple 服务器请求结果...";
             };
 
             recognition.onresult = async (event) => {
                 const transcript = event.results[0][0].transcript;
+                rawTranscriptDisplay.innerText = `[底层听到]: "${transcript}"`;
                 
-                // 【核心修复 2】把原始识别结果显示出来，方便诊断问题
-                rawTranscriptDisplay.innerText = `[底层听到内容]: "${transcript}"`;
-                
-                // 去掉空格和标点符号，只保留纯字母
                 const word = transcript.replace(/[^a-zA-Z]/g, '').toLowerCase();
                 
                 if (!word) {
-                    statusText.innerText = "⚠️ 警告：未识别出任何英文字母。";
-                    resultWordDisplay.innerText = "未识别";
-                    meaningDisplay.innerText = "请检查刚才【底层听到内容】中是否包含字母，可以试着发音更干脆一些。";
+                    statusText.innerText = "⚠️ 未识别出字母，请发音更清晰些。";
                     return;
                 }
 
                 resultWordDisplay.innerText = word;
                 statusText.innerText = "正在查询字典...";
-                meaningDisplay.innerText = "查询中...";
-
                 await processWord(word);
             };
 
             recognition.onerror = (event) => {
-                console.error("底层识别错误代码:", event.error);
-                
-                // 友好的中文错误提示映射
+                console.error("识别错误:", event.error);
                 const errorMap = {
-                    'network': "网络不佳：无法连接到 Apple 听写服务器。",
-                    'not-allowed': "权限拒绝：请在 Safari 设置中允许麦克风权限。",
-                    'no-speech': "静音超时：没听到声音，请大点声或靠进麦克风。",
-                    'service-not-allowed': "服务禁用：请在【设置-通用-键盘-启用听写】中开启。",
-                    'aborted': "识别被意外终止。"
+                    'network': "网络不佳，无法连接苹果服务器。",
+                    'not-allowed': "请在 Safari 设置中允许麦克风权限。",
+                    'no-speech': "没听到声音，请靠进麦克风。",
+                    'service-not-allowed': "请在【设置-通用-键盘-启用听写】中开启。",
+                    'aborted': "识别已取消。"
                 };
-                
-                statusText.innerText = "❌ 错误: " + (errorMap[event.error] || event.error);
+                statusText.innerText = "❌ " + (errorMap[event.error] || event.error);
             };
 
+            // onend 代表麦克风通道已经彻底关闭
             recognition.onend = () => {
-                isRecording = false;
+                isSystemBusy = false; // 彻底释放系统锁
+                
+                // 恢复按钮初始状态
+                recordBtn.classList.remove('busy');
                 recordBtn.classList.remove('recording');
-                recordBtn.innerText = "🎙️ 点击开始拼写字母";
-                // 如果没有触发 onresult 直接结束了（通常是因为没说话或全背景噪音）
-                if(statusText.innerText.includes("请读出字母") || statusText.innerText.includes("检测到停顿")) {
-                    statusText.innerText = "识别自动结束 (未捕捉到有效声音)。";
+                recordBtn.innerText = "按住开始拼写字母";
+
+                // 如果松手后系统丢弃了音频（没触发 onresult），进行补救提示
+                if(statusText.innerText === "已松开，等待系统解析...") {
+                    statusText.innerText = "未捕捉到有效声音，请重试。";
                 }
             };
 
             try {
                 recognition.start();
             } catch (err) {
-                console.error("唤醒麦克风异常:", err);
-                isRecording = false;
-                statusText.innerText = "❌ 启动麦克风失败，请尝试刷新网页。";
-                killZombieRecognition();
+                isSystemBusy = false;
+                statusText.innerText = "启动麦克风失败，请重试。";
             }
-        }
+        };
 
-        // 绑定点击事件 (iOS 下单纯的 click 比 mousedown/touchstart 兼容性更好)
-        recordBtn.addEventListener('click', toggleRecording);
+        // 2. 松开按钮：结束并等待结果
+        const stopRecording = (e) => {
+            e.preventDefault();
+            if (!isUserPressing) return; // 防止多重事件重复触发
+            isUserPressing = false;
 
-        // 处理单词：查询释义并保存
+            if (recognition && isSystemBusy) {
+                recognition.stop();
+                
+                // 松开手后，在 onend 触发前，按钮变成灰色锁定状态
+                recordBtn.classList.remove('recording');
+                recordBtn.classList.add('busy');
+                recordBtn.innerText = "⏳ 处理中...";
+                statusText.innerText = "已松开，等待系统解析...";
+            }
+        };
+
+        // 绑定事件（兼容触摸屏和鼠标）
+        recordBtn.addEventListener('mousedown', startRecording);
+        recordBtn.addEventListener('touchstart', startRecording, {passive: false});
+        
+        // 松开、移出按钮、系统打断，都触发结束
+        recordBtn.addEventListener('mouseup', stopRecording);
+        recordBtn.addEventListener('touchend', stopRecording);
+        recordBtn.addEventListener('mouseleave', stopRecording);
+        recordBtn.addEventListener('touchcancel', stopRecording);
+
+        // 处理单词和缓存逻辑（保持不变）
         async function processWord(word) {
-            let meaning = "暂无释义，可能拼写有误或字典未收录。";
-            
+            let meaning = "暂无释义。";
             try {
-                // 使用公共免费字典 API
                 const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
                 if (response.ok) {
                     const data = await response.json();
@@ -224,8 +207,7 @@
                     statusText.innerText = "⚠️ 字典中未找到该词。";
                 }
             } catch (error) {
-                console.error("查词网络错误:", error);
-                meaning = "网络错误，无法连接到字典服务器获取释义。";
+                meaning = "网络错误，查词失败。";
                 statusText.innerText = "❌ 查词请求失败";
             }
 
@@ -234,16 +216,10 @@
             renderVocabList();
         }
 
-        // 保存单词到 LocalStorage
         function saveWord(word, meaning) {
             const archiveName = document.getElementById('archiveName').value || today;
             let vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
-            
-            if (!vocabData[archiveName]) {
-                vocabData[archiveName] = [];
-            }
-            
-            // 查重并插入最前面
+            if (!vocabData[archiveName]) vocabData[archiveName] = [];
             const exists = vocabData[archiveName].find(w => w.word === word);
             if (!exists) {
                 vocabData[archiveName].unshift({ word, meaning });
@@ -251,51 +227,38 @@
             }
         }
 
-        // 渲染生词列表
         function renderVocabList() {
             const vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
             vocabListDisplay.innerHTML = '';
-
             for (const archive in vocabData) {
                 const groupDiv = document.createElement('div');
                 groupDiv.className = 'archive-group';
-                
                 const header = document.createElement('div');
                 header.className = 'archive-header';
                 header.innerHTML = `<span>📂 ${archive}</span> <span style="font-size: 13px; color: #8e8e93; font-weight: normal;">${vocabData[archive].length} 词</span>`;
                 groupDiv.appendChild(header);
-
                 vocabData[archive].forEach(item => {
                     const wordDiv = document.createElement('div');
                     wordDiv.className = 'word-item';
-                    wordDiv.innerHTML = `
-                        <span class="word-word">${item.word}</span>
-                        <span class="word-meaning">${item.meaning}</span>
-                    `;
+                    wordDiv.innerHTML = `<span class="word-word">${item.word}</span><span class="word-meaning">${item.meaning}</span>`;
                     groupDiv.appendChild(wordDiv);
                 });
-
                 vocabListDisplay.appendChild(groupDiv);
             }
         }
 
-        // 导出为 CSV 功能
         exportBtn.addEventListener('click', () => {
             const vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
             if (Object.keys(vocabData).length === 0) {
-                alert("生词本是空的，先去录入几个单词吧！");
-                return;
+                alert("生词本是空的！"); return;
             }
-
             let csvContent = "\uFEFF归档名称,单词,释义\n";
-
             for (const archive in vocabData) {
                 vocabData[archive].forEach(item => {
                     let safeMeaning = item.meaning.replace(/"/g, '""');
                     csvContent += `"${archive}","${item.word}","${safeMeaning}"\n`;
                 });
             }
-
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement("a");
@@ -306,7 +269,6 @@
             document.body.removeChild(link);
         });
 
-        // 初始化渲染
         renderVocabList();
     </script>
 </body>
