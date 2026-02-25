@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>语音拼写生词本 v4.1.0</title>
+    <title>语音拼写生词本 v4.2.0</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; background: #f4f7f6; color: #333; }
         .card { background: white; padding: 25px 20px; border-radius: 16px; box-shadow: 0 8px 20px rgba(0,0,0,0.06); margin-bottom: 20px; text-align: center; }
         h2 { margin-top: 0; font-size: 20px; color: #1c1c1e; display: flex; justify-content: space-between; align-items: center;}
-        .version-tag { font-size: 12px; background: linear-gradient(135deg, #c31432 0%, #240b36 100%); padding: 3px 10px; border-radius: 12px; color: #fff; font-weight: bold; letter-spacing: 0.5px;}
+        .version-tag { font-size: 12px; background: #5f2c82; padding: 3px 10px; border-radius: 12px; color: #fff; font-weight: bold; letter-spacing: 0.5px;}
         
         #recordBtn { background: #007aff; color: white; border: none; padding: 18px 30px; font-size: 18px; font-weight: 600; border-radius: 50px; cursor: pointer; user-select: none; transition: all 0.2s; width: 100%; box-shadow: 0 4px 12px rgba(0,122,255,0.3); -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;}
         #recordBtn.recording { background: #ff3b30; box-shadow: 0 4px 12px rgba(255,59,48,0.4); transform: scale(0.96); }
@@ -39,15 +39,12 @@
         .word-word { font-size: 18px; font-weight: 700; color: #007aff; }
         
         .audio-btn { background: #e5f1ff; color: #007aff; border: none; border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; font-size: 12px; cursor: pointer; }
-        .audio-btn:active { transform: scale(0.9); }
         
         .word-meaning { font-size: 14px; color: #636366; margin-top: 6px; line-height: 1.5; }
         .word-meaning-cn { color: #d9534f; font-weight: 600; margin-bottom: 3px; }
         
         .action-btns { display: flex; gap: 5px; }
-        .icon-btn { background: #f2f2f7; border: none; font-size: 14px; cursor: pointer; padding: 6px 10px; border-radius: 8px; transition: background 0.2s; -webkit-tap-highlight-color: transparent; }
-        .icon-btn:active { background: #e5e5ea; }
-        .icon-btn.danger:active { background: #ffe5e5; color: red;}
+        .icon-btn { background: #f2f2f7; border: none; font-size: 14px; cursor: pointer; padding: 6px 10px; border-radius: 8px; }
     </style>
 </head>
 <body>
@@ -55,27 +52,18 @@
     <div class="card">
         <h2>
             🎙️ 语音拼写生词本
-            <span class="version-tag">v4.1.0-Prestige</span>
+            <span class="version-tag">v4.2.0-Genius</span>
         </h2>
-        
-        <div class="input-group">
-            <label for="archiveName">归档名称 (可修改为书名/章节):</label>
-            <input type="text" id="archiveName" placeholder="例如: 2026-02-25">
-        </div>
-
+        <div class="input-group"><label for="archiveName">归档名称 (可修改为书名/章节):</label><input type="text" id="archiveName"></div>
         <button id="recordBtn">按住开始拼写字母</button>
         <div class="status" id="statusText">准备就绪...</div>
         <div id="rawTranscript"></div>
-        
         <div id="resultWord">...</div>
-        <div id="meaning">短语中有空格时，请读 "space" 或直接停顿</div>
+        <div id="meaning">需要空格时，请读 "add space"</div>
     </div>
 
     <div class="card word-list">
-        <h2>
-            📚 你的生词本
-            <button id="exportBtn" class="btn-export-all">💾 导出全部</button>
-        </h2>
+        <h2>📚 你的生词本 <button id="exportBtn" class="btn-export-all">💾 导出全部</button></h2>
         <div id="vocabList"></div>
     </div>
 
@@ -93,7 +81,6 @@
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         let recognition = null;
-        
         let isSystemBusy = false; 
         let fallbackTimer = null; 
         let hasActuallyStarted = false; 
@@ -128,7 +115,7 @@
             recognition.onstart = () => {
                 hasActuallyStarted = true; 
                 recordBtn.classList.add('recording');
-                recordBtn.innerText = "🛑 正在聆听... (短语请加读 space)";
+                recordBtn.innerText = "🛑 正在聆听...";
                 statusText.innerText = "请开始拼读字母...";
             };
 
@@ -137,18 +124,16 @@
                 let transcript = event.results[0][0].transcript.toLowerCase();
                 rawTranscriptDisplay.innerText = `[听到内容]: "${transcript}"`;
                 
-                // 【V4.1.0 核心修复1：智能识别短语空格】
-                // 允许两种方式生成空格：
-                // 1. 语音读出 "space"，替换为占位符
-                // 2. iOS系统自己识别出的停顿空格（保留）
-                let processed = transcript.replace(/\bspace\b/g, '_');
-                // 现在允许字母(a-z), 占位符(_), 和系统自带的空格(\s)
+                // 【V4.2.0 核心修复：使用 "add space" 作为空格命令】
+                // 1. 将语音命令 "add space" 替换为一个安全的占位符
+                let processed = transcript.replace(/\badd space\b/g, '_');
+                // 2. 清理所有非字母、非系统自带空格、非占位符的字符
                 let word = processed.replace(/[^a-z\s_]/g, ''); 
-                // 最后把占位符变回空格，并把多个连续空格压缩成一个
+                // 3. 将占位符变回空格，并将所有连续空格压缩成一个
                 word = word.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
                 
                 if (!word) {
-                    statusText.innerText = "⚠️ 识别结果中未包含英文字母。";
+                    statusText.innerText = "⚠️ 未识别出有效字符。";
                     return;
                 }
 
@@ -183,14 +168,14 @@
                 resetRecognition();
                 isSystemBusy = false;
                 recordBtn.innerText = "按住开始拼写字母";
-                statusText.innerText = "权限已更新，请重新按住按钮录音。";
+                statusText.innerText = "权限已更新，请重新按住。";
                 return;
             }
 
             recordBtn.classList.remove('recording');
             recordBtn.classList.add('busy');
             recordBtn.innerText = "⏳ 接收结果中...";
-            statusText.innerText = "已松开，等待系统回传数据...";
+            statusText.innerText = "已松开，等待系统回传...";
 
             fallbackTimer = setTimeout(() => {
                 if (isSystemBusy && recognition) {
@@ -206,11 +191,9 @@
         recordBtn.addEventListener('mouseleave', stopRecording);
         recordBtn.addEventListener('touchcancel', stopRecording);
 
-        // ================= 2. 查词与翻译逻辑 =================
         async function processWord(word, specificArchive = null) {
             let enMeaning = "暂无英文释义（短语或专有名词可能未被英文词典收录）。";
             let cnMeaning = "暂无中文释义。";
-            
             const safeWordUrl = encodeURIComponent(word);
 
             try {
@@ -227,13 +210,12 @@
                         const dictData = await dictRes.json();
                         enMeaning = dictData[0].meanings[0].definitions[0].definition;
                     }
-                } catch(e) { /* 忽略英文词典的报错 */ }
+                } catch(e) {}
                 
                 statusText.innerText = "✅ 查询成功！";
             } catch (error) { statusText.innerText = "⚠️ 网络异常，仅保存拼写"; }
 
             const combinedMeaning = `【中】${cnMeaning}\n【英】${enMeaning}`;
-            
             meaningDisplay.innerHTML = `<span class="cn-meaning">${cnMeaning}</span><span class="en-meaning">${enMeaning}</span>`;
             resultWordDisplay.innerText = word;
 
@@ -241,32 +223,25 @@
             renderVocabList();
         }
 
-        // ================= 3. 数据管理与渲染 =================
         function saveWord(word, meaning, specificArchive) {
             const archiveName = specificArchive || (document.getElementById('archiveName').value || today);
-            
-            // 数据层
             let vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
             if (!vocabData[archiveName]) vocabData[archiveName] = [];
             vocabData[archiveName] = vocabData[archiveName].filter(w => w.word !== word);
             vocabData[archiveName].unshift({ word, meaning });
             localStorage.setItem('myVocabBook', JSON.stringify(vocabData));
 
-            // 【V4.1.0 核心修复2：动态置顶排序】
-            // 排序索引层
             let order = JSON.parse(localStorage.getItem('myVocabBook_order')) || [];
-            // 移除旧位置，保证唯一性
             order = order.filter(name => name !== archiveName);
-            // 放到最前面
             order.unshift(archiveName);
             localStorage.setItem('myVocabBook_order', JSON.stringify(order));
         }
 
         function editWord(archive, oldWord) {
-            const newWord = prompt(`请将 "${oldWord}" 修改为正确的拼写 (短语可以直接加空格)：`, oldWord);
+            const newWord = prompt(`请修改 "${oldWord}"：`, oldWord);
             if (newWord && newWord.trim() !== "" && newWord !== oldWord) {
                 const cleanWord = newWord.replace(/[^a-zA-Z\s]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-                if(!cleanWord) { alert("单词只能包含英文字母和空格！"); return; }
+                if(!cleanWord) { alert("只能包含英文字母和空格！"); return; }
                 
                 let vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
                 vocabData[archive] = vocabData[archive].filter(item => item.word !== oldWord);
@@ -284,7 +259,6 @@
                 vocabData[archive] = vocabData[archive].filter(item => item.word !== word);
                 if (vocabData[archive].length === 0) {
                     delete vocabData[archive];
-                    // 如果归档被删，排序索引也要同步删除
                     let order = JSON.parse(localStorage.getItem('myVocabBook_order')) || [];
                     order = order.filter(name => name !== archive);
                     localStorage.setItem('myVocabBook_order', JSON.stringify(order));
@@ -340,7 +314,7 @@
             for (const archive in vocabData) {
                 const exportList = [...vocabData[archive]].reverse();
                 exportList.forEach(item => {
-                    let safeMeaning = item.meaning.replace(/"/g, '""').replace(/\n/g, ' '); // CSV中换行也替换掉
+                    let safeMeaning = item.meaning.replace(/"/g, '""').replace(/\n/g, ' ');
                     csvContent += `"${archive}","${item.word}","${safeMeaning}"\n`;
                 });
             }
@@ -356,9 +330,7 @@
 
         function exportArchive(name) {
             const vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
-            if(vocabData[name]) {
-                generateCSV({ [name]: vocabData[name] }, name);
-            }
+            if(vocabData[name]) { generateCSV({ [name]: vocabData[name] }, name); }
         }
 
         exportBtn.addEventListener('click', () => {
@@ -371,10 +343,9 @@
 
         function renderVocabList() {
             const vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
-            const order = JSON.parse(localStorage.getItem('myVocabBook_order')) || [];
+            let order = JSON.parse(localStorage.getItem('myVocabBook_order')) || [];
             vocabListDisplay.innerHTML = '';
             
-            // 清理一下可能存在的无效排序键
             const validOrder = order.filter(name => vocabData[name]);
 
             validOrder.forEach(archive => {
@@ -384,15 +355,12 @@
                 const header = document.createElement('div');
                 header.className = 'archive-header';
                 header.innerHTML = `
-                    <div class="archive-title">
-                        📂 ${archive} <span style="font-size:12px;color:#888;">(${vocabData[archive].length}词)</span>
-                    </div>
+                    <div class="archive-title">📂 ${archive} <span style="font-size:12px;color:#888;">(${vocabData[archive].length}词)</span></div>
                     <div class="archive-actions">
                         <button class="icon-btn" onclick="exportArchive('${archive.replace(/'/g, "\\'")}')">💾</button>
                         <button class="icon-btn" onclick="renameArchive('${archive.replace(/'/g, "\\'")}')">✏️</button>
                         <button class="icon-btn danger" onclick="deleteArchive('${archive.replace(/'/g, "\\'")}')">🗑️</button>
-                    </div>
-                `;
+                    </div>`;
                 groupDiv.appendChild(header);
                 
                 vocabData[archive].forEach(item => {
@@ -402,7 +370,6 @@
 
                     const wordDiv = document.createElement('div');
                     wordDiv.className = 'word-item';
-                    
                     wordDiv.innerHTML = `
                         <div class="word-content">
                             <div class="word-header">
@@ -417,8 +384,7 @@
                         <div class="action-btns">
                             <button class="icon-btn" onclick="editWord('${archive.replace(/'/g, "\\'")}', '${item.word.replace(/'/g, "\\'")}')">✏️</button>
                             <button class="icon-btn danger" onclick="deleteWord('${archive.replace(/'/g, "\\'")}', '${item.word.replace(/'/g, "\\'")}')">🗑️</button>
-                        </div>
-                    `;
+                        </div>`;
                     groupDiv.appendChild(wordDiv);
                 });
                 vocabListDisplay.appendChild(groupDiv);
