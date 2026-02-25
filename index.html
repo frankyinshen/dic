@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>语音拼写生词本 v3.0.0</title>
+    <title>语音拼写生词本 v4.0.0</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; background: #f4f7f6; color: #333; }
         .card { background: white; padding: 25px 20px; border-radius: 16px; box-shadow: 0 8px 20px rgba(0,0,0,0.06); margin-bottom: 20px; text-align: center; }
         h2 { margin-top: 0; font-size: 20px; color: #1c1c1e; display: flex; justify-content: space-between; align-items: center;}
-        .version-tag { font-size: 12px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 3px 10px; border-radius: 12px; color: #fff; font-weight: bold; letter-spacing: 0.5px;}
+        .version-tag { font-size: 12px; background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); padding: 3px 10px; border-radius: 12px; color: #fff; font-weight: bold; letter-spacing: 0.5px;}
         
         #recordBtn { background: #007aff; color: white; border: none; padding: 18px 30px; font-size: 18px; font-weight: 600; border-radius: 50px; cursor: pointer; user-select: none; transition: all 0.2s; width: 100%; box-shadow: 0 4px 12px rgba(0,122,255,0.3); -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;}
         #recordBtn.recording { background: #ff3b30; box-shadow: 0 4px 12px rgba(255,59,48,0.4); transform: scale(0.96); }
@@ -38,14 +38,12 @@
         .word-header { display: flex; align-items: center; gap: 8px; }
         .word-word { font-size: 18px; font-weight: 700; color: #007aff; }
         
-        /* 朗读按钮 */
         .audio-btn { background: #e5f1ff; color: #007aff; border: none; border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; font-size: 12px; cursor: pointer; }
         .audio-btn:active { transform: scale(0.9); }
         
         .word-meaning { font-size: 14px; color: #636366; margin-top: 6px; line-height: 1.5; }
         .word-meaning-cn { color: #d9534f; font-weight: 600; margin-bottom: 3px; }
         
-        /* 操作按钮组 */
         .action-btns { display: flex; gap: 5px; }
         .icon-btn { background: #f2f2f7; border: none; font-size: 14px; cursor: pointer; padding: 6px 10px; border-radius: 8px; transition: background 0.2s; -webkit-tap-highlight-color: transparent; }
         .icon-btn:active { background: #e5e5ea; }
@@ -57,7 +55,7 @@
     <div class="card">
         <h2>
             🎙️ 语音拼写生词本
-            <span class="version-tag">v3.0.0-Ultimate</span>
+            <span class="version-tag">v4.0.0-Master</span>
         </h2>
         
         <div class="input-group">
@@ -70,7 +68,7 @@
         <div id="rawTranscript"></div>
         
         <div id="resultWord">...</div>
-        <div id="meaning">等待查词...</div>
+        <div id="meaning">短语中有空格时，请读 "space"</div>
     </div>
 
     <div class="card word-list">
@@ -98,7 +96,7 @@
         
         let isSystemBusy = false; 
         let fallbackTimer = null; 
-        let hasActuallyStarted = false; // 新增：解决权限申请弹窗时的卡死Bug
+        let hasActuallyStarted = false; 
 
         function resetRecognition() {
             if (recognition) {
@@ -112,7 +110,6 @@
             clearTimeout(fallbackTimer);
         }
 
-        // ================= 1. 语音识别核心逻辑 =================
         const startRecording = (e) => {
             e.preventDefault();
             if (isSystemBusy) return; 
@@ -135,18 +132,25 @@
             recognition.continuous = false;
 
             recognition.onstart = () => {
-                hasActuallyStarted = true; // 真正开始录音了
+                hasActuallyStarted = true; 
                 recordBtn.classList.add('recording');
-                recordBtn.innerText = "🛑 正在聆听... (请说完再松手)";
+                recordBtn.innerText = "🛑 正在聆听... (短语请加读 space)";
                 statusText.innerText = "请开始拼读字母...";
             };
 
             recognition.onresult = async (event) => {
                 clearTimeout(fallbackTimer); 
-                const transcript = event.results[0][0].transcript;
+                let transcript = event.results[0][0].transcript.toLowerCase();
                 rawTranscriptDisplay.innerText = `[听到内容]: "${transcript}"`;
                 
-                const word = transcript.replace(/[^a-zA-Z]/g, '').toLowerCase();
+                // 【核心修复1：魔法识别短语空格】
+                // 把用户读出的 "space" 单词暂时替换为一个特殊占位符 '_'
+                let processed = transcript.replace(/\bspace\b/g, '_');
+                // 无差别删掉其它所有字母间的空格（因为系统会把 a p p l e 加上空格）
+                let word = processed.replace(/[^a-z_]/g, '');
+                // 最后把占位符 '_' 变回真正的空格
+                word = word.replace(/_/g, ' ').trim();
+                
                 if (!word) {
                     statusText.innerText = "⚠️ 识别结果中未包含英文字母。";
                     return;
@@ -154,7 +158,7 @@
 
                 resultWordDisplay.innerText = word;
                 statusText.innerText = "正在翻译查询中...";
-                await processWord(word); // 默认保存到当前输入框的归档
+                await processWord(word); 
             };
 
             recognition.onerror = (event) => {
@@ -184,7 +188,6 @@
             e.preventDefault();
             if (!isSystemBusy) return; 
 
-            // 【核心修复】：如果是第一次授权麦克风弹窗导致松手，此时根本没开始录音
             if (!hasActuallyStarted) {
                 resetRecognition();
                 isSystemBusy = false;
@@ -193,7 +196,6 @@
                 return;
             }
 
-            // 正常松手，进入缓冲期
             recordBtn.classList.remove('recording');
             recordBtn.classList.add('busy');
             recordBtn.innerText = "⏳ 接收结果中...";
@@ -213,30 +215,34 @@
         recordBtn.addEventListener('mouseleave', stopRecording);
         recordBtn.addEventListener('touchcancel', stopRecording);
 
-
         // ================= 2. 查词与翻译逻辑 =================
         async function processWord(word, specificArchive = null) {
-            let enMeaning = "暂无英文释义。";
+            let enMeaning = "暂无英文释义（短语或专有名词可能未被英文词典收录）。";
             let cnMeaning = "暂无中文释义。";
+            
+            // 使用 encodeURIComponent 确保短语中的空格能正确发送到 API
+            const safeWordUrl = encodeURIComponent(word);
 
             try {
-                // 1. 获取中文翻译 (使用免费的 MyMemory API)
-                const transRes = await fetch(`https://api.mymemory.translated.net/get?q=${word}&langpair=en|zh-CN`);
+                // 1. 获取中文翻译 (优先查中文，短语更容易查到)
+                const transRes = await fetch(`https://api.mymemory.translated.net/get?q=${safeWordUrl}&langpair=en|zh-CN`);
                 const transData = await transRes.json();
                 if (transData && transData.responseData) {
                     let text = transData.responseData.translatedText;
-                    // 防止机器翻译原样返回英文
                     if (text.toLowerCase() !== word.toLowerCase()) {
                         cnMeaning = text;
                     }
                 }
                 
-                // 2. 获取英文权威释义
-                const dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
-                if (dictRes.ok) {
-                    const dictData = await dictRes.json();
-                    enMeaning = dictData[0].meanings[0].definitions[0].definition;
-                }
+                // 2. 获取英文权威释义 (单独包裹try-catch，防止短语404打断整个保存流程)
+                try {
+                    const dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${safeWordUrl}`);
+                    if (dictRes.ok) {
+                        const dictData = await dictRes.json();
+                        enMeaning = dictData[0].meanings[0].definitions[0].definition;
+                    }
+                } catch(e) { /* 忽略英文词典的报错，保留默认提示 */ }
+                
                 statusText.innerText = "✅ 查询成功！";
             } catch (error) {
                 statusText.innerText = "⚠️ 网络异常，仅保存拼写";
@@ -244,11 +250,9 @@
 
             const combinedMeaning = `【中】${cnMeaning}\n【英】${enMeaning}`;
             
-            // 顶部显示区域更新
             meaningDisplay.innerHTML = `<span class="cn-meaning">${cnMeaning}</span><span class="en-meaning">${enMeaning}</span>`;
             resultWordDisplay.innerText = word;
 
-            // 存入归档
             saveWord(word, combinedMeaning, specificArchive);
             renderVocabList();
         }
@@ -259,28 +263,24 @@
             let vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
             if (!vocabData[archiveName]) vocabData[archiveName] = [];
             
-            // 如果存在旧的同名单词，先删除，保证新查的词总是放在最顶端（最新）
             vocabData[archiveName] = vocabData[archiveName].filter(w => w.word !== word);
-            
-            // unshift 保证最新的单词永远在数组索引 0 的位置
-            vocabData[archiveName].unshift({ word, meaning });
+            vocabData[archiveName].unshift({ word, meaning }); // 界面上最新的永远在最前面
             localStorage.setItem('myVocabBook', JSON.stringify(vocabData));
         }
 
-        // 修改单词拼写 (核心需求)
+        // 修改单词拼写
         function editWord(archive, oldWord) {
-            const newWord = prompt(`检测到识别可能错误。\n\n请将 "${oldWord}" 修改为正确的拼写：`, oldWord);
+            const newWord = prompt(`检测到识别可能错误。\n\n请将 "${oldWord}" 修改为正确的拼写 (短语可以直接加空格)：`, oldWord);
             if (newWord && newWord.trim() !== "" && newWord !== oldWord) {
-                const cleanWord = newWord.replace(/[^a-zA-Z]/g, '').toLowerCase();
-                if(!cleanWord) { alert("单词只能包含英文字母！"); return; }
+                // 【核心修复2：手工编辑保留空格】 正则表达式中加入 \s 允许空格，并将多个空格合并为一个
+                const cleanWord = newWord.replace(/[^a-zA-Z\s]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+                if(!cleanWord) { alert("单词只能包含英文字母和空格！"); return; }
                 
-                // 1. 先从列表中删掉那个认错的词
                 let vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
                 vocabData[archive] = vocabData[archive].filter(item => item.word !== oldWord);
                 if (vocabData[archive].length === 0) delete vocabData[archive];
                 localStorage.setItem('myVocabBook', JSON.stringify(vocabData));
                 
-                // 2. 带着特定的归档名称去查新词并自动保存进去
                 statusText.innerText = `正在重新查询 ${cleanWord} ...`;
                 processWord(cleanWord, archive); 
             }
@@ -296,20 +296,15 @@
             }
         }
 
-        // 归档管理
         function renameArchive(oldName) {
             const newName = prompt("请输入新的归档名称：", oldName);
             if (newName && newName.trim() && newName !== oldName) {
                 let vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
-                if (vocabData[newName]) {
-                    alert("该归档名称已存在！"); return;
-                }
+                if (vocabData[newName]) { alert("该归档名称已存在！"); return; }
                 vocabData[newName] = vocabData[oldName];
                 delete vocabData[oldName];
                 localStorage.setItem('myVocabBook', JSON.stringify(vocabData));
-                if(document.getElementById('archiveName').value === oldName) {
-                    document.getElementById('archiveName').value = newName;
-                }
+                if(document.getElementById('archiveName').value === oldName) { document.getElementById('archiveName').value = newName; }
                 renderVocabList();
             }
         }
@@ -323,19 +318,22 @@
             }
         }
 
-        // iOS 原生发音功能
+        // 发音功能（现在会正确读出带有空格的短语了）
         function speakWord(word) {
+            window.speechSynthesis.cancel();
             const utterance = new SpeechSynthesisUtterance(word);
             utterance.lang = 'en-US'; 
-            utterance.rate = 0.9; // 稍微放慢语速方便学习
+            utterance.rate = 0.9; 
             window.speechSynthesis.speak(utterance);
         }
 
-        // 导出功能
-        function generateCSV(vocabData, fileNamePrefix) {
+        // ================= 4. 导出逻辑 =================
+        function generateCSV(vocabData, fileName) {
             let csvContent = "\uFEFF归档名称,单词,释义\n";
             for (const archive in vocabData) {
-                vocabData[archive].forEach(item => {
+                // 【核心修复3：导出倒序】使用 [...Array].reverse() 让最老的（先录入的）排在最上面
+                const exportList = [...vocabData[archive]].reverse();
+                exportList.forEach(item => {
                     let safeMeaning = item.meaning.replace(/"/g, '""');
                     csvContent += `"${archive}","${item.word}","${safeMeaning}"\n`;
                 });
@@ -344,7 +342,7 @@
             const url = URL.createObjectURL(blob);
             const link = document.createElement("a");
             link.setAttribute("href", url);
-            link.setAttribute("download", `${fileNamePrefix}.csv`);
+            link.setAttribute("download", `${fileName}.csv`); // 文件名完全按传入的值生成
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -353,29 +351,37 @@
         function exportArchive(name) {
             const vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
             if(vocabData[name]) {
-                generateCSV({ [name]: vocabData[name] }, `生词归档_${name}`);
+                // 单个导出：文件名正好就是归档名字本身
+                generateCSV({ [name]: vocabData[name] }, name);
             }
         }
 
         exportBtn.addEventListener('click', () => {
             const vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
             if (Object.keys(vocabData).length === 0) { alert("生词本是空的！"); return; }
-            generateCSV(vocabData, `全部生词本_${today}`);
+            
+            // 全部导出：生成纯数字时间戳 20260225095130
+            const now = new Date();
+            const timeStr = now.getFullYear().toString() + 
+                            (now.getMonth() + 1).toString().padStart(2, '0') + 
+                            now.getDate().toString().padStart(2, '0') + 
+                            now.getHours().toString().padStart(2, '0') + 
+                            now.getMinutes().toString().padStart(2, '0') + 
+                            now.getSeconds().toString().padStart(2, '0');
+            
+            generateCSV(vocabData, timeStr);
         });
 
-        // 渲染列表
         function renderVocabList() {
             const vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
             vocabListDisplay.innerHTML = '';
             
-            // 将归档按名称倒序排列（最新的日期/名字排在最前面）
             const sortedArchives = Object.keys(vocabData).sort((a, b) => b.localeCompare(a));
 
             sortedArchives.forEach(archive => {
                 const groupDiv = document.createElement('div');
                 groupDiv.className = 'archive-group';
                 
-                // 归档头部栏 (增加改名、删除、导出功能)
                 const header = document.createElement('div');
                 header.className = 'archive-header';
                 header.innerHTML = `
@@ -390,9 +396,7 @@
                 `;
                 groupDiv.appendChild(header);
                 
-                // 由于存入时用了 unshift，遍历时本身就是最新的在最前面
                 vocabData[archive].forEach(item => {
-                    // 分离中英文释义
                     const meaningParts = item.meaning.split('\n【英】');
                     let cnText = meaningParts[0].replace('【中】', '');
                     let enText = meaningParts[1] || '';
@@ -404,7 +408,7 @@
                         <div class="word-content">
                             <div class="word-header">
                                 <span class="word-word">${item.word}</span>
-                                <button class="audio-btn" onclick="speakWord('${item.word}')">🔊</button>
+                                <button class="audio-btn" onclick="speakWord('${item.word.replace(/'/g, "\\'")}')">🔊</button>
                             </div>
                             <div class="word-meaning">
                                 <div class="word-meaning-cn">${cnText}</div>
@@ -412,8 +416,8 @@
                             </div>
                         </div>
                         <div class="action-btns">
-                            <button class="icon-btn" onclick="editWord('${archive}', '${item.word}')">✏️</button>
-                            <button class="icon-btn danger" onclick="deleteWord('${archive}', '${item.word}')">🗑️</button>
+                            <button class="icon-btn" onclick="editWord('${archive}', '${item.word.replace(/'/g, "\\'")}')">✏️</button>
+                            <button class="icon-btn danger" onclick="deleteWord('${archive}', '${item.word.replace(/'/g, "\\'")}')">🗑️</button>
                         </div>
                     `;
                     groupDiv.appendChild(wordDiv);
