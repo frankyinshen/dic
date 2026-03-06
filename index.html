@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>语音拼写生词本 v4.6.1</title>
+    <title>语音拼写生词本 v4.6.2</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; background: #f4f7f6; color: #333; }
         .card { background: white; padding: 25px 20px; border-radius: 16px; box-shadow: 0 8px 20px rgba(0,0,0,0.06); margin-bottom: 20px; text-align: center; }
@@ -71,7 +71,7 @@
 <div class="card">
     <h2>
         🎙️ 语音拼写生词本
-        <span class="version-tag">v4.6.1</span>
+        <span class="version-tag">v4.6.2</span>
     </h2>
     <div class="input-group"><label for="archiveName">归档名称:</label><input type="text" id="archiveName"></div>
     <button id="recordBtn">按住开始拼写字母</button>
@@ -290,96 +290,66 @@
     });
 
     // ═══════════════════════════════════════════════════════════════
-    // 语音识别核心 —— v4.6.1 竞态修复版
+    // 语音识别核心 —— v4.6.2
     //
-    // 【根本原因】iOS/iPadOS 打开麦克风需要 200~800ms 初始化，
-    //   onstart 触发才代表真正开始录音。
-    //   若用户说话很快就松手，stopRecording 会在 onstart 之前
-    //   调用 stop()，引擎还没开麦，什么都没录到，onresult 不触发。
+    // 【真正根本原因 —— 由用户实测发现】
+    //   iOS/iPadOS 的 WebKit 语音引擎"不松手、等静默"能正常识别，
+    //   而"说完松手"却失败。这直接证明：
+    //   调用 recognition.stop() 会在音频数据还未传回服务器之前
+    //   截断连接，导致 onresult 永远不触发。
+    //   stop() 在 iOS WebKit 上的实际行为 = abort()，结果丢失。
     //
-    // 【修复方案】双标志位 hasStarted + stopRequested：
-    //   · 松手时若 onstart 尚未触发 → 只记录 stopRequested=true，
-    //     不立即 stop()
-    //   · onstart 触发时若 stopRequested=true → 再保留最少
-    //     MIN_RECORD_MS(600ms) 的录音窗口后再 stop()
-    //   · 这样无论用户多快松手，引擎都能完整录到语音
+    // 【正确方案】对 iOS 设备：松手后完全不调用 stop()，
+    //   让引擎自己检测到静默后自然结束（会正常触发 onresult）。
+    //   只设一个安全超时兜底，防止用户说完很久没反应时卡住。
     //
-    // 【UI 改进】按下按钮立即显示"🟡 等待麦克风开启..."，
-    //   变红（onstart 触发）后才是真正可以开始说话的时机。
+    // 【非 iOS 设备】stop() 工作正常，松手后立即调用，体验更流畅。
+    //
+    // 【正确操作步骤】
+    //   1. 按住按钮，等变红（麦克风就绪）
+    //   2. 清晰说出字母，说完后松手
+    //   3. 松手后按钮变橙色"等待识别..."，稍等 1~2 秒
+    //   4. 引擎检测到静默，自动回传结果
     // ═══════════════════════════════════════════════════════════════
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    let recognition    = null;
-    let isSystemBusy   = false;
-    let fallbackTimer  = null;
-    let hasStarted     = false;   // onstart 是否已触发（麦克风真正开启）
-    let stopRequested  = false;   // 用户是否在 onstart 前就已松手
-    let startTime      = 0;       // onstart 触发的时间戳
-    const MIN_RECORD_MS = 600;    // 最少保留的录音窗口（毫秒）
+    let recognition   = null;
+    let isSystemBusy  = false;
+    let fallbackTimer = null;
 
     function resetRecognition() {
         if (recognition) {
-            recognition.onstart = null;
-            recognition.onresult = null;
-            recognition.onerror = null;
-            recognition.onend = null;
-            try { recognition.abort(); } catch(e){}
+            recognition.onstart = recognition.onresult = recognition.onerror = recognition.onend = null;
+            try { recognition.abort(); } catch(e) {}
             recognition = null;
         }
         clearTimeout(fallbackTimer);
-        hasStarted    = false;
-        stopRequested = false;
-        startTime     = 0;
     }
 
     function setIdleUI() {
         isSystemBusy = false;
+        recordBtn.style.background = '';
         recordBtn.classList.remove('busy', 'recording');
         recordBtn.innerText = "按住开始拼写字母";
-    }
-
-    // 真正执行 stop 的统一出口，保证最少录音时长
-    function doStop() {
-        const elapsed = Date.now() - startTime;
-        const remaining = MIN_RECORD_MS - elapsed;
-        if (remaining > 0) {
-            // 还没到最短录音时间，延迟剩余毫秒后再 stop
-            fallbackTimer = setTimeout(() => {
-                if (recognition) try { recognition.stop(); } catch(e){}
-            }, remaining);
-        } else {
-            if (recognition) try { recognition.stop(); } catch(e){}
-        }
-        // 安全兜底：8 秒后强制恢复 UI
-        clearTimeout(fallbackTimer);
-        const safeDelay = Math.max(remaining, 0) + 8000;
-        fallbackTimer = setTimeout(() => {
-            if (isSystemBusy) {
-                setIdleUI();
-                statusText.innerText = "⚠️ 超时未收到结果，请重试";
-            }
-        }, safeDelay);
     }
 
     const startRecording = (e) => {
         e.preventDefault();
         if (isSystemBusy) return;
-
-        isSystemBusy  = true;
-        hasStarted    = false;
-        stopRequested = false;
+        isSystemBusy = true;
         rawTranscriptDisplay.innerText = "";
         resetRecognition();
 
         if (!SpeechRecognition) {
-            statusText.innerText = "❌ 浏览器不支持语音识别。";
+            statusText.innerText = "❌ 浏览器不支持语音识别";
             isSystemBusy = false;
             return;
         }
 
-        // 立即更新 UI，提示用户等待麦克风就绪
+        // 按下立即变橙色，提示等待麦克风初始化
         recordBtn.style.background = '#ff9500';
+        recordBtn.classList.remove('recording', 'busy');
         recordBtn.innerText = "🟡 等待麦克风开启...";
-        statusText.innerText = "等待麦克风初始化，请稍候...";
+        statusText.innerText = "麦克风初始化中，请稍候...";
 
         recognition = new SpeechRecognition();
         recognition.lang = 'en-US';
@@ -388,30 +358,17 @@
         recognition.continuous = false;
 
         recognition.onstart = () => {
-            hasStarted = true;
-            startTime  = Date.now();
-
-            // 更新 UI 为录音中（红色）
+            // 麦克风真正就绪，变红，现在可以说话了
             recordBtn.style.background = '';
             recordBtn.classList.remove('busy');
             recordBtn.classList.add('recording');
-            recordBtn.innerText = "🛑 正在聆听，说完松手...";
-            statusText.innerText = "✅ 麦克风已就绪，请开始拼读字母！";
-
-            // 如果用户在 onstart 之前就已经松手了，现在才真正执行 stop
-            if (stopRequested) {
-                recordBtn.classList.remove('recording');
-                recordBtn.classList.add('busy');
-                recordBtn.style.background = '';
-                recordBtn.innerText = "⏳ 处理中...";
-                statusText.innerText = "已松手，正在处理...";
-                doStop();
-            }
+            recordBtn.innerText = "🛑 正在聆听...说完后松手";
+            statusText.innerText = "✅ 开始拼读字母，说完后松手！";
         };
 
         recognition.onresult = async (event) => {
             clearTimeout(fallbackTimer);
-            let transcript = event.results[0][0].transcript.toLowerCase().trim();
+            const transcript = event.results[0][0].transcript.toLowerCase().trim();
             rawTranscriptDisplay.innerText = `[听到内容]: "${transcript}"`;
 
             // ── title title 指令：更改归档名称 ──
@@ -432,15 +389,12 @@
                 word = rawTokens.join('');
             } else {
                 let processed = transcript.replace(/\byahoo\b/g, '_');
-                word = processed.replace(/[^a-z\s_]/g, '');
-                word = word.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+                word = processed.replace(/[^a-z\s_]/g, '').replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
                 const tokens2 = word.split(' ').filter(t => t.length > 0);
-                if (tokens2.length > 1 && tokens2.every(t => t.length === 1)) {
-                    word = tokens2.join('');
-                }
+                if (tokens2.length > 1 && tokens2.every(t => t.length === 1)) word = tokens2.join('');
             }
 
-            if (!word) { statusText.innerText = "⚠️ 未识别出有效字符。"; return; }
+            if (!word) { statusText.innerText = "⚠️ 未识别出有效字符"; return; }
             resultWordDisplay.innerText = word;
             statusText.innerText = "正在翻译查询中...";
             await processWord(word);
@@ -448,27 +402,23 @@
 
         recognition.onerror = (event) => {
             clearTimeout(fallbackTimer);
-            if (event.error === 'aborted') {
-                statusText.innerText = "⚠️ 录音被中断，请再试一次";
-            } else if (event.error === 'no-speech') {
-                statusText.innerText = "⚠️ 未检测到语音，请大声重试";
-            } else {
-                statusText.innerText = `❌ 识别错误: ${event.error}`;
-            }
+            // iOS 上 stop() 会触发 aborted，这里静默处理不报错
+            if (event.error === 'aborted') return;
+            statusText.innerText = event.error === 'no-speech'
+                ? "⚠️ 未检测到语音，请大声重试"
+                : `❌ 识别错误: ${event.error}`;
         };
 
         recognition.onend = () => {
             clearTimeout(fallbackTimer);
-            recordBtn.style.background = '';
             setIdleUI();
-            // 若 onresult 已成功处理，statusText 已被覆盖，此处不会误显示错误
-            if (statusText.innerText.includes("处理中") || statusText.innerText.includes("等待系统回传")) {
+            // 只有在"等待结果"状态下才提示重试，避免覆盖成功消息
+            if (statusText.innerText.includes("等待识别")) {
                 statusText.innerText = "⚠️ 未收到有效内容，请重试";
             }
         };
 
-        try { recognition.start(); } catch (err) {
-            recordBtn.style.background = '';
+        try { recognition.start(); } catch(err) {
             setIdleUI();
             statusText.innerText = "❌ 启动失败，请重试";
         }
@@ -477,29 +427,35 @@
     const stopRecording = (e) => {
         e.preventDefault();
         if (!isSystemBusy) return;
-        // 已经在 busy（等待结果）状态则不重复处理
+        // 已经在等待结果中，不重复处理
         if (recordBtn.classList.contains('busy') && !recordBtn.classList.contains('recording')) return;
 
+        // 更新 UI：松手后变橙色等待
         recordBtn.style.background = '';
         recordBtn.classList.remove('recording');
         recordBtn.classList.add('busy');
-        recordBtn.innerText = "⏳ 接收结果中...";
-        statusText.innerText = "已松开，等待系统回传...";
+        recordBtn.innerText = "⏳ 等待识别结果...";
+        statusText.innerText = "已松开，引擎处理中，稍等片刻...";
 
-        if (!hasStarted) {
-            // onstart 还没触发 → 麦克风还没开，先记录请求，等 onstart 里处理
-            stopRequested = true;
-            // 兜底：如果 onstart 一直没触发（极少数情况），8秒后强制复位
+        if (IS_TOUCH) {
+            // ── iOS/iPadOS：绝对不调用 stop() ──────────────────────
+            // stop() 在 iOS WebKit 上会截断音频传输，等同于 abort()。
+            // 正确做法是什么都不做，让引擎检测到静默后自然回传结果。
+            // 只设 10 秒安全超时兜底（正常 1~3 秒就会回来）。
             fallbackTimer = setTimeout(() => {
                 if (isSystemBusy) {
-                    recordBtn.style.background = '';
+                    if (recognition) try { recognition.abort(); } catch(e) {}
                     setIdleUI();
-                    statusText.innerText = "⚠️ 麦克风未能开启，请检查权限后重试";
+                    statusText.innerText = "⚠️ 超时，请重试";
                 }
-            }, 8000);
+            }, 10000);
         } else {
-            // onstart 已触发，直接走 doStop（含最短录音保护）
-            doStop();
+            // ── 非 iOS（桌面浏览器）：正常调用 stop() ──────────────
+            // 桌面端 stop() 行为正常：停止录音并回传已录内容。
+            if (recognition) try { recognition.stop(); } catch(e) {}
+            fallbackTimer = setTimeout(() => {
+                if (isSystemBusy) { setIdleUI(); statusText.innerText = "⚠️ 超时，请重试"; }
+            }, 8000);
         }
     };
 
