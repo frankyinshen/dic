@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>语音拼写生词本 v4.6.0</title>
+    <title>语音拼写生词本 v4.6.1</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; background: #f4f7f6; color: #333; }
         .card { background: white; padding: 25px 20px; border-radius: 16px; box-shadow: 0 8px 20px rgba(0,0,0,0.06); margin-bottom: 20px; text-align: center; }
@@ -71,7 +71,7 @@
 <div class="card">
     <h2>
         🎙️ 语音拼写生词本
-        <span class="version-tag">v4.6.0</span>
+        <span class="version-tag">v4.6.1</span>
     </h2>
     <div class="input-group"><label for="archiveName">归档名称:</label><input type="text" id="archiveName"></div>
     <button id="recordBtn">按住开始拼写字母</button>
@@ -289,21 +289,32 @@
         }
     });
 
-    // ────────────────────────────────────────────────────────────
-    // 语音识别核心 —— v4.6.0 修复版
-    // 核心改动：
-    //   [BUG-FIX-1] stopRecording 改为立即调用 recognition.stop()，
-    //               不再延迟 2 秒。iOS/iPadOS 的 WebKit 引擎在用户
-    //               松手后如不立即通知结束，会因静默超时自行中断并
-    //               丢弃结果。stop() 只是通知引擎"不再录音"，结果
-    //               仍会通过 onresult 异步回传，不会截断。
-    //   [BUG-FIX-2] 安全超时兜底从 2s 改为 6s，防止网络慢时误判。
-    //   [FEATURE]   新增 "title title ..." 指令：更改当前归档名称。
-    // ────────────────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════
+    // 语音识别核心 —— v4.6.1 竞态修复版
+    //
+    // 【根本原因】iOS/iPadOS 打开麦克风需要 200~800ms 初始化，
+    //   onstart 触发才代表真正开始录音。
+    //   若用户说话很快就松手，stopRecording 会在 onstart 之前
+    //   调用 stop()，引擎还没开麦，什么都没录到，onresult 不触发。
+    //
+    // 【修复方案】双标志位 hasStarted + stopRequested：
+    //   · 松手时若 onstart 尚未触发 → 只记录 stopRequested=true，
+    //     不立即 stop()
+    //   · onstart 触发时若 stopRequested=true → 再保留最少
+    //     MIN_RECORD_MS(600ms) 的录音窗口后再 stop()
+    //   · 这样无论用户多快松手，引擎都能完整录到语音
+    //
+    // 【UI 改进】按下按钮立即显示"🟡 等待麦克风开启..."，
+    //   变红（onstart 触发）后才是真正可以开始说话的时机。
+    // ═══════════════════════════════════════════════════════════════
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    let recognition = null;
-    let isSystemBusy = false;
-    let fallbackTimer = null;
+    let recognition    = null;
+    let isSystemBusy   = false;
+    let fallbackTimer  = null;
+    let hasStarted     = false;   // onstart 是否已触发（麦克风真正开启）
+    let stopRequested  = false;   // 用户是否在 onstart 前就已松手
+    let startTime      = 0;       // onstart 触发的时间戳
+    const MIN_RECORD_MS = 600;    // 最少保留的录音窗口（毫秒）
 
     function resetRecognition() {
         if (recognition) {
@@ -315,6 +326,9 @@
             recognition = null;
         }
         clearTimeout(fallbackTimer);
+        hasStarted    = false;
+        stopRequested = false;
+        startTime     = 0;
     }
 
     function setIdleUI() {
@@ -323,11 +337,36 @@
         recordBtn.innerText = "按住开始拼写字母";
     }
 
+    // 真正执行 stop 的统一出口，保证最少录音时长
+    function doStop() {
+        const elapsed = Date.now() - startTime;
+        const remaining = MIN_RECORD_MS - elapsed;
+        if (remaining > 0) {
+            // 还没到最短录音时间，延迟剩余毫秒后再 stop
+            fallbackTimer = setTimeout(() => {
+                if (recognition) try { recognition.stop(); } catch(e){}
+            }, remaining);
+        } else {
+            if (recognition) try { recognition.stop(); } catch(e){}
+        }
+        // 安全兜底：8 秒后强制恢复 UI
+        clearTimeout(fallbackTimer);
+        const safeDelay = Math.max(remaining, 0) + 8000;
+        fallbackTimer = setTimeout(() => {
+            if (isSystemBusy) {
+                setIdleUI();
+                statusText.innerText = "⚠️ 超时未收到结果，请重试";
+            }
+        }, safeDelay);
+    }
+
     const startRecording = (e) => {
         e.preventDefault();
         if (isSystemBusy) return;
 
-        isSystemBusy = true;
+        isSystemBusy  = true;
+        hasStarted    = false;
+        stopRequested = false;
         rawTranscriptDisplay.innerText = "";
         resetRecognition();
 
@@ -337,6 +376,11 @@
             return;
         }
 
+        // 立即更新 UI，提示用户等待麦克风就绪
+        recordBtn.style.background = '#ff9500';
+        recordBtn.innerText = "🟡 等待麦克风开启...";
+        statusText.innerText = "等待麦克风初始化，请稍候...";
+
         recognition = new SpeechRecognition();
         recognition.lang = 'en-US';
         recognition.interimResults = false;
@@ -344,10 +388,25 @@
         recognition.continuous = false;
 
         recognition.onstart = () => {
-            if (recordBtn.classList.contains('busy')) return;
+            hasStarted = true;
+            startTime  = Date.now();
+
+            // 更新 UI 为录音中（红色）
+            recordBtn.style.background = '';
+            recordBtn.classList.remove('busy');
             recordBtn.classList.add('recording');
-            recordBtn.innerText = "🛑 正在聆听...";
-            statusText.innerText = "请开始拼读字母...";
+            recordBtn.innerText = "🛑 正在聆听，说完松手...";
+            statusText.innerText = "✅ 麦克风已就绪，请开始拼读字母！";
+
+            // 如果用户在 onstart 之前就已经松手了，现在才真正执行 stop
+            if (stopRequested) {
+                recordBtn.classList.remove('recording');
+                recordBtn.classList.add('busy');
+                recordBtn.style.background = '';
+                recordBtn.innerText = "⏳ 处理中...";
+                statusText.innerText = "已松手，正在处理...";
+                doStop();
+            }
         };
 
         recognition.onresult = async (event) => {
@@ -355,8 +414,7 @@
             let transcript = event.results[0][0].transcript.toLowerCase().trim();
             rawTranscriptDisplay.innerText = `[听到内容]: "${transcript}"`;
 
-            // ── [FEATURE] title title 指令：更改归档名称 ──
-            // 例：说 "title title math week three"
+            // ── title title 指令：更改归档名称 ──
             const titleMatch = transcript.match(/\btitle\s+title\s+(.+)/);
             if (titleMatch) {
                 const newName = titleMatch[1].trim().replace(/\s+/g, ' ');
@@ -368,18 +426,14 @@
             }
 
             // ── 正常拼写处理 ──
-            // 【Windows拼接修复】所有 token 都是单字母时直接拼接
             const rawTokens = transcript.split(/\s+/).filter(t => t.length > 0);
             let word;
             if (rawTokens.length > 1 && rawTokens.every(t => t.length === 1 && /[a-z]/.test(t))) {
                 word = rawTokens.join('');
             } else {
-                // yahoo → 空格指令
                 let processed = transcript.replace(/\byahoo\b/g, '_');
                 word = processed.replace(/[^a-z\s_]/g, '');
                 word = word.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
-
-                // 兜底：若处理后仍是单字母 token，直接拼接
                 const tokens2 = word.split(' ').filter(t => t.length > 0);
                 if (tokens2.length > 1 && tokens2.every(t => t.length === 1)) {
                     word = tokens2.join('');
@@ -405,13 +459,16 @@
 
         recognition.onend = () => {
             clearTimeout(fallbackTimer);
+            recordBtn.style.background = '';
             setIdleUI();
-            if (statusText.innerText.includes("等待系统回传")) {
-                statusText.innerText = "⚠️ 识别已结束，未收到有效内容";
+            // 若 onresult 已成功处理，statusText 已被覆盖，此处不会误显示错误
+            if (statusText.innerText.includes("处理中") || statusText.innerText.includes("等待系统回传")) {
+                statusText.innerText = "⚠️ 未收到有效内容，请重试";
             }
         };
 
         try { recognition.start(); } catch (err) {
+            recordBtn.style.background = '';
             setIdleUI();
             statusText.innerText = "❌ 启动失败，请重试";
         }
@@ -419,31 +476,31 @@
 
     const stopRecording = (e) => {
         e.preventDefault();
-        if (!isSystemBusy || recordBtn.classList.contains('busy')) return;
+        if (!isSystemBusy) return;
+        // 已经在 busy（等待结果）状态则不重复处理
+        if (recordBtn.classList.contains('busy') && !recordBtn.classList.contains('recording')) return;
 
+        recordBtn.style.background = '';
         recordBtn.classList.remove('recording');
         recordBtn.classList.add('busy');
         recordBtn.innerText = "⏳ 接收结果中...";
         statusText.innerText = "已松开，等待系统回传...";
 
-        // ── [BUG-FIX-1] iOS核心修复 ──────────────────────────────
-        // 旧版：延迟2秒才 stop()，iOS WebKit 静默超时会提前中断，
-        //       导致 onresult 永远不触发。
-        // 新版：立即调用 stop()，通知引擎"停止录音但请处理结果"。
-        //       stop() ≠ abort()。stop() 会触发 onresult → onend。
-        //       abort() 才是强行放弃，不触发 onresult。
-        // ─────────────────────────────────────────────────────────
-        if (recognition) {
-            try { recognition.stop(); } catch(err) {}
+        if (!hasStarted) {
+            // onstart 还没触发 → 麦克风还没开，先记录请求，等 onstart 里处理
+            stopRequested = true;
+            // 兜底：如果 onstart 一直没触发（极少数情况），8秒后强制复位
+            fallbackTimer = setTimeout(() => {
+                if (isSystemBusy) {
+                    recordBtn.style.background = '';
+                    setIdleUI();
+                    statusText.innerText = "⚠️ 麦克风未能开启，请检查权限后重试";
+                }
+            }, 8000);
+        } else {
+            // onstart 已触发，直接走 doStop（含最短录音保护）
+            doStop();
         }
-
-        // 安全兜底：6秒后如果 onend 还没触发，强制恢复 UI
-        fallbackTimer = setTimeout(() => {
-            if (isSystemBusy) {
-                setIdleUI();
-                statusText.innerText = "⚠️ 超时未收到结果，请重试";
-            }
-        }, 6000);
     };
 
     // ── 事件绑定：触摸设备不绑 mouseleave（防误触）──
