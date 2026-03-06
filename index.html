@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>语音拼写生词本 v4.5.0</title>
+    <title>语音拼写生词本 v4.6.0</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; background: #f4f7f6; color: #333; }
         .card { background: white; padding: 25px 20px; border-radius: 16px; box-shadow: 0 8px 20px rgba(0,0,0,0.06); margin-bottom: 20px; text-align: center; }
         h2 { margin-top: 0; font-size: 20px; color: #1c1c1e; display: flex; justify-content: space-between; align-items: center;}
-        .version-tag { font-size: 12px; background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); padding: 3px 10px; border-radius: 12px; color: #fff; font-weight: bold; letter-spacing: 0.5px;}
+        .version-tag { font-size: 12px; background: linear-gradient(135deg, #007aff 0%, #5ac8fa 100%); padding: 3px 10px; border-radius: 12px; color: #fff; font-weight: bold; letter-spacing: 0.5px;}
 
         #recordBtn { background: #007aff; color: white; border: none; padding: 18px 30px; font-size: 18px; font-weight: 600; border-radius: 50px; cursor: pointer; user-select: none; transition: all 0.2s; width: 100%; box-shadow: 0 4px 12px rgba(0,122,255,0.3); -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;}
         #recordBtn.recording { background: #ff3b30; box-shadow: 0 4px 12px rgba(255,59,48,0.4); transform: scale(0.96); }
@@ -21,6 +21,10 @@
         #resultWord { font-size: 40px; font-weight: 800; margin: 15px 0; color: #1c1c1e; letter-spacing: 2px; }
         #meaning { font-size: 15px; color: #3a3a3c; min-height: 45px; background: #f2f2f7; padding: 12px; border-radius: 12px; line-height: 1.5; text-align: left;}
         .cn-meaning { color: #d9534f; font-weight: bold; margin-bottom: 5px; display: block; }
+
+        /* 指令提示区 */
+        .hint-box { margin-top: 10px; background: #fff9e6; border: 1px solid #ffe58f; border-radius: 12px; padding: 10px 14px; text-align: left; font-size: 12px; color: #7a5900; line-height: 1.8; }
+        .hint-box strong { color: #b06a00; }
 
         /* TTS 切换区 */
         .tts-box { margin-top: 14px; background: #f2f2f7; border-radius: 14px; padding: 12px 16px; }
@@ -67,7 +71,7 @@
 <div class="card">
     <h2>
         🎙️ 语音拼写生词本
-        <span class="version-tag">v4.5.0-GooglePro</span>
+        <span class="version-tag">v4.6.0</span>
     </h2>
     <div class="input-group"><label for="archiveName">归档名称:</label><input type="text" id="archiveName"></div>
     <button id="recordBtn">按住开始拼写字母</button>
@@ -75,6 +79,13 @@
     <div id="rawTranscript"></div>
     <div id="resultWord">...</div>
     <div id="meaning">需要空格时，请大声读 "yahoo"</div>
+
+    <!-- 语音指令提示 -->
+    <div class="hint-box">
+        💡 <strong>语音指令：</strong><br>
+        空格：说 <strong>"yahoo"</strong>（如 A yahoo B → "a b"）<br>
+        改归档：说 <strong>"title title 新名称"</strong>（如 "title title math week3"）
+    </div>
 
     <!-- TTS 切换区 -->
     <div class="tts-box">
@@ -146,6 +157,7 @@
     }
     const DEVICE_TYPE = getDeviceType();
     const IS_TOUCH = (DEVICE_TYPE === 'iPhone' || DEVICE_TYPE === 'iPad');
+    const IS_IOS = IS_TOUCH; // iPhone + iPad 统称 iOS
 
     // ── TTS 切换 ──
     ttsToggle.addEventListener('change', () => {
@@ -277,7 +289,17 @@
         }
     });
 
-    // ── 语音识别 (V4.5.0 旗舰优化版) ──
+    // ────────────────────────────────────────────────────────────
+    // 语音识别核心 —— v4.6.0 修复版
+    // 核心改动：
+    //   [BUG-FIX-1] stopRecording 改为立即调用 recognition.stop()，
+    //               不再延迟 2 秒。iOS/iPadOS 的 WebKit 引擎在用户
+    //               松手后如不立即通知结束，会因静默超时自行中断并
+    //               丢弃结果。stop() 只是通知引擎"不再录音"，结果
+    //               仍会通过 onresult 异步回传，不会截断。
+    //   [BUG-FIX-2] 安全超时兜底从 2s 改为 6s，防止网络慢时误判。
+    //   [FEATURE]   新增 "title title ..." 指令：更改当前归档名称。
+    // ────────────────────────────────────────────────────────────
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     let recognition = null;
     let isSystemBusy = false;
@@ -285,23 +307,35 @@
 
     function resetRecognition() {
         if (recognition) {
-            recognition.onstart = null; recognition.onresult = null;
-            recognition.onerror = null; recognition.onend = null;
+            recognition.onstart = null;
+            recognition.onresult = null;
+            recognition.onerror = null;
+            recognition.onend = null;
             try { recognition.abort(); } catch(e){}
             recognition = null;
         }
         clearTimeout(fallbackTimer);
     }
 
+    function setIdleUI() {
+        isSystemBusy = false;
+        recordBtn.classList.remove('busy', 'recording');
+        recordBtn.innerText = "按住开始拼写字母";
+    }
+
     const startRecording = (e) => {
         e.preventDefault();
         if (isSystemBusy) return;
-        
+
         isSystemBusy = true;
         rawTranscriptDisplay.innerText = "";
         resetRecognition();
-        
-        if (!SpeechRecognition) { statusText.innerText = "❌ 浏览器不支持语音识别。"; isSystemBusy = false; return; }
+
+        if (!SpeechRecognition) {
+            statusText.innerText = "❌ 浏览器不支持语音识别。";
+            isSystemBusy = false;
+            return;
+        }
 
         recognition = new SpeechRecognition();
         recognition.lang = 'en-US';
@@ -310,9 +344,7 @@
         recognition.continuous = false;
 
         recognition.onstart = () => {
-            // 【竞态保护】：如果还没响叮当你就松开了手（进入了busy状态），就不再切换回红色的录音UI
             if (recordBtn.classList.contains('busy')) return;
-            
             recordBtn.classList.add('recording');
             recordBtn.innerText = "🛑 正在聆听...";
             statusText.innerText = "请开始拼读字母...";
@@ -323,18 +355,31 @@
             let transcript = event.results[0][0].transcript.toLowerCase().trim();
             rawTranscriptDisplay.innerText = `[听到内容]: "${transcript}"`;
 
-            // 【Windows拼接修复】
+            // ── [FEATURE] title title 指令：更改归档名称 ──
+            // 例：说 "title title math week three"
+            const titleMatch = transcript.match(/\btitle\s+title\s+(.+)/);
+            if (titleMatch) {
+                const newName = titleMatch[1].trim().replace(/\s+/g, ' ');
+                document.getElementById('archiveName').value = newName;
+                resultWordDisplay.innerText = `📂 ${newName}`;
+                meaningDisplay.innerHTML = `<span class="cn-meaning">✅ 归档名已更新！</span>当前归档：${newName}`;
+                statusText.innerText = `✅ 归档名已改为：${newName}`;
+                return;
+            }
+
+            // ── 正常拼写处理 ──
+            // 【Windows拼接修复】所有 token 都是单字母时直接拼接
             const rawTokens = transcript.split(/\s+/).filter(t => t.length > 0);
             let word;
             if (rawTokens.length > 1 && rawTokens.every(t => t.length === 1 && /[a-z]/.test(t))) {
                 word = rawTokens.join('');
             } else {
-                // 【V4.5.0 核心升级：改用极具辨识度的 yahoo 作为空格指令】
+                // yahoo → 空格指令
                 let processed = transcript.replace(/\byahoo\b/g, '_');
                 word = processed.replace(/[^a-z\s_]/g, '');
                 word = word.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
-                
-                // 兜底再次检测（针对 Windows 某些奇怪的拆分）
+
+                // 兜底：若处理后仍是单字母 token，直接拼接
                 const tokens2 = word.split(' ').filter(t => t.length > 0);
                 if (tokens2.length > 1 && tokens2.every(t => t.length === 1)) {
                     word = tokens2.join('');
@@ -360,20 +405,20 @@
 
         recognition.onend = () => {
             clearTimeout(fallbackTimer);
-            isSystemBusy = false;
-            recordBtn.classList.remove('busy', 'recording');
-            recordBtn.innerText = "按住开始拼写字母";
+            setIdleUI();
             if (statusText.innerText.includes("等待系统回传")) {
                 statusText.innerText = "⚠️ 识别已结束，未收到有效内容";
             }
         };
 
-        try { recognition.start(); } catch (err) { isSystemBusy = false; statusText.innerText = "❌ 启动失败，请重试"; }
+        try { recognition.start(); } catch (err) {
+            setIdleUI();
+            statusText.innerText = "❌ 启动失败，请重试";
+        }
     };
 
     const stopRecording = (e) => {
         e.preventDefault();
-        // 如果系统空闲，或者按钮已经处于 busy 等待状态，则不重复执行
         if (!isSystemBusy || recordBtn.classList.contains('busy')) return;
 
         recordBtn.classList.remove('recording');
@@ -381,13 +426,24 @@
         recordBtn.innerText = "⏳ 接收结果中...";
         statusText.innerText = "已松开，等待系统回传...";
 
-        // 【iOS底层Bug修复】：彻底移除了粗暴的 abort() 拦截。
-        // 现在统一给予系统 2 秒的处理时间，让它把音频平稳地传给服务器。
+        // ── [BUG-FIX-1] iOS核心修复 ──────────────────────────────
+        // 旧版：延迟2秒才 stop()，iOS WebKit 静默超时会提前中断，
+        //       导致 onresult 永远不触发。
+        // 新版：立即调用 stop()，通知引擎"停止录音但请处理结果"。
+        //       stop() ≠ abort()。stop() 会触发 onresult → onend。
+        //       abort() 才是强行放弃，不触发 onresult。
+        // ─────────────────────────────────────────────────────────
+        if (recognition) {
+            try { recognition.stop(); } catch(err) {}
+        }
+
+        // 安全兜底：6秒后如果 onend 还没触发，强制恢复 UI
         fallbackTimer = setTimeout(() => {
-            if (isSystemBusy && recognition) { 
-                try { recognition.stop(); } catch(err){} 
+            if (isSystemBusy) {
+                setIdleUI();
+                statusText.innerText = "⚠️ 超时未收到结果，请重试";
             }
-        }, 2000);
+        }, 6000);
     };
 
     // ── 事件绑定：触摸设备不绑 mouseleave（防误触）──
@@ -423,21 +479,37 @@
         const combinedMeaning = `【中】${cnMeaning}\n【英】${enMeaning}`;
         meaningDisplay.innerHTML = `<span class="cn-meaning">${cnMeaning}</span><span class="en-meaning">${enMeaning}</span>`;
         resultWordDisplay.innerText = word;
+        speakWord(word);
         saveWord(word, combinedMeaning, specificArchive);
         renderVocabList();
     }
 
+    // ── 数据存储 ──
+    function getVocabData() {
+        return JSON.parse(localStorage.getItem('myVocabBook')) || {};
+    }
+    function getOrder() {
+        return JSON.parse(localStorage.getItem('myVocabBook_order')) || [];
+    }
+    function setVocabData(data) {
+        localStorage.setItem('myVocabBook', JSON.stringify(data));
+    }
+    function setOrder(order) {
+        localStorage.setItem('myVocabBook_order', JSON.stringify(order));
+    }
+
     function saveWord(word, meaning, specificArchive) {
         const archiveName = specificArchive || (document.getElementById('archiveName').value || today);
-        let vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
+        let vocabData = getVocabData();
         if (!vocabData[archiveName]) vocabData[archiveName] = [];
         vocabData[archiveName] = vocabData[archiveName].filter(w => w.word !== word);
         vocabData[archiveName].unshift({ word, meaning });
-        localStorage.setItem('myVocabBook', JSON.stringify(vocabData));
-        let order = JSON.parse(localStorage.getItem('myVocabBook_order')) ||[];
+        setVocabData(vocabData);
+
+        let order = getOrder();
         order = order.filter(name => name !== archiveName);
         order.unshift(archiveName);
-        localStorage.setItem('myVocabBook_order', JSON.stringify(order));
+        setOrder(order);
     }
 
     function editWord(archive, oldWord) {
@@ -445,10 +517,10 @@
         if (newWord && newWord.trim() !== "" && newWord !== oldWord) {
             const cleanWord = newWord.replace(/[^a-zA-Z\s]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
             if (!cleanWord) { alert("只能包含英文字母和空格！"); return; }
-            let vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
+            let vocabData = getVocabData();
             vocabData[archive] = vocabData[archive].filter(item => item.word !== oldWord);
             if (vocabData[archive].length === 0) delete vocabData[archive];
-            localStorage.setItem('myVocabBook', JSON.stringify(vocabData));
+            setVocabData(vocabData);
             statusText.innerText = `正在重新查询 ${cleanWord} ...`;
             processWord(cleanWord, archive);
         }
@@ -456,15 +528,16 @@
 
     function deleteWord(archive, word) {
         if (confirm(`确定删除单词 "${word}" 吗？`)) {
-            let vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
+            let vocabData = getVocabData();
             vocabData[archive] = vocabData[archive].filter(item => item.word !== word);
             if (vocabData[archive].length === 0) {
+                // 归档也为空了，连同从 order 里一并清除
                 delete vocabData[archive];
-                let order = JSON.parse(localStorage.getItem('myVocabBook_order')) ||[];
+                let order = getOrder();
                 order = order.filter(name => name !== archive);
-                localStorage.setItem('myVocabBook_order', JSON.stringify(order));
+                setOrder(order);
             }
-            localStorage.setItem('myVocabBook', JSON.stringify(vocabData));
+            setVocabData(vocabData);
             renderVocabList();
         }
     }
@@ -472,88 +545,103 @@
     function renameArchive(oldName) {
         const newName = prompt("请输入新的归档名称：", oldName);
         if (newName && newName.trim() && newName !== oldName) {
-            let vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
+            let vocabData = getVocabData();
             if (vocabData[newName]) { alert("该归档名称已存在！"); return; }
             vocabData[newName] = vocabData[oldName];
             delete vocabData[oldName];
-            localStorage.setItem('myVocabBook', JSON.stringify(vocabData));
-            let order = JSON.parse(localStorage.getItem('myVocabBook_order')) ||[];
+            setVocabData(vocabData);
+            let order = getOrder();
             const index = order.indexOf(oldName);
             if (index > -1) order[index] = newName;
-            localStorage.setItem('myVocabBook_order', JSON.stringify(order));
-            if (document.getElementById('archiveName').value === oldName) document.getElementById('archiveName').value = newName;
+            setOrder(order);
+            if (document.getElementById('archiveName').value === oldName)
+                document.getElementById('archiveName').value = newName;
             renderVocabList();
         }
     }
 
     function deleteArchive(name) {
         if (confirm(`⚠️ 危险操作：\n确定要彻底删除归档【${name}】吗？`)) {
-            let vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
+            let vocabData = getVocabData();
             delete vocabData[name];
-            localStorage.setItem('myVocabBook', JSON.stringify(vocabData));
-            let order = JSON.parse(localStorage.getItem('myVocabBook_order')) ||[];
+            setVocabData(vocabData);
+            let order = getOrder();
             order = order.filter(n => n !== name);
-            localStorage.setItem('myVocabBook_order', JSON.stringify(order));
+            setOrder(order);
             renderVocabList();
         }
     }
 
-    function generateCSV(vocabData, fileName) {
+    // ── [BUG-FIX-2] 导出：以 order 为唯一来源，与渲染逻辑完全一致 ──
+    // 旧版用 for(in) 遍历 vocabData 全部 key，若 order 与 vocabData
+    // 出现不同步（例如删除流程中间异常），已删除的归档会混入 CSV。
+    // 新版严格按照渲染所用的 order.filter(n => vocabData[n]) 过滤，
+    // 保证"看到什么就导出什么"。
+    function generateCSV(exportVocabData, exportOrder, fileName) {
         let csvContent = "\uFEFF归档名称,单词,释义\n";
-        for (const archive in vocabData) {
-            [...vocabData[archive]].reverse().forEach(item => {
-                let safeMeaning = item.meaning.replace(/"/g, '""').replace(/\n/g, ' ');
-                csvContent += `"${archive}","${item.word}","${safeMeaning}"\n`;
+        // 只遍历 order 中存在的、且 vocabData 中有数据的归档
+        exportOrder
+            .filter(name => exportVocabData[name] && exportVocabData[name].length > 0)
+            .forEach(archive => {
+                [...exportVocabData[archive]].reverse().forEach(item => {
+                    let safeMeaning = item.meaning.replace(/"/g, '""').replace(/\n/g, ' ');
+                    csvContent += `"${archive}","${item.word}","${safeMeaning}"\n`;
+                });
             });
-        }
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url; link.download = `${fileName}.csv`;
         document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        URL.revokeObjectURL(url);
     }
 
     function exportArchive(name) {
-        const vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
-        if (vocabData[name]) generateCSV({ [name]: vocabData[name] }, name);
+        const vocabData = getVocabData();
+        const order = getOrder();
+        if (vocabData[name]) generateCSV({ [name]: vocabData[name] }, [name], name);
     }
 
     exportBtn.addEventListener('click', () => {
-        const vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
-        if (Object.keys(vocabData).length === 0) { alert("生词本是空的！"); return; }
+        const vocabData = getVocabData();
+        const order = getOrder();
+        const activeArchives = order.filter(n => vocabData[n] && vocabData[n].length > 0);
+        if (activeArchives.length === 0) { alert("生词本是空的！"); return; }
         const now = new Date();
         const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`;
-        generateCSV(vocabData, ts);
+        generateCSV(vocabData, order, ts);
     });
 
     function renderVocabList() {
-        const vocabData = JSON.parse(localStorage.getItem('myVocabBook')) || {};
-        let order = JSON.parse(localStorage.getItem('myVocabBook_order')) || [];
+        const vocabData = getVocabData();
+        const order = getOrder();
         vocabListDisplay.innerHTML = '';
-        order.filter(name => vocabData[name]).forEach(archive => {
+        order.filter(name => vocabData[name] && vocabData[name].length > 0).forEach(archive => {
             const groupDiv = document.createElement('div');
             groupDiv.className = 'archive-group';
+            const safeArchive = archive.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
             const header = document.createElement('div');
             header.className = 'archive-header';
             header.innerHTML = `
                 <div class="archive-title">📂 ${archive} <span style="font-size:12px;color:#888;">(${vocabData[archive].length}词)</span></div>
                 <div class="archive-actions">
-                    <button class="icon-btn" onclick="exportArchive('${archive.replace(/'/g,"\\'")}')">💾</button>
-                    <button class="icon-btn" onclick="renameArchive('${archive.replace(/'/g,"\\'")}')">✏️</button>
-                    <button class="icon-btn" onclick="deleteArchive('${archive.replace(/'/g,"\\'")}')">🗑️</button>
+                    <button class="icon-btn" onclick="exportArchive('${safeArchive}')">💾</button>
+                    <button class="icon-btn" onclick="renameArchive('${safeArchive}')">✏️</button>
+                    <button class="icon-btn" onclick="deleteArchive('${safeArchive}')">🗑️</button>
                 </div>`;
             groupDiv.appendChild(header);
             vocabData[archive].forEach(item => {
                 const parts = item.meaning.split('\n【英】');
                 let cnText = parts[0].replace('【中】', '');
                 let enText = parts[1] || '';
+                const safeWord = item.word.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                 const wordDiv = document.createElement('div');
                 wordDiv.className = 'word-item';
                 wordDiv.innerHTML = `
                     <div class="word-content">
                         <div class="word-header">
                             <span class="word-word">${item.word}</span>
-                            <button class="audio-btn" onclick="speakWord('${item.word.replace(/'/g,"\\'")}')">🔊</button>
+                            <button class="audio-btn" onclick="speakWord('${safeWord}')">🔊</button>
                         </div>
                         <div class="word-meaning">
                             <div class="word-meaning-cn">${cnText}</div>
@@ -561,8 +649,8 @@
                         </div>
                     </div>
                     <div class="action-btns">
-                        <button class="icon-btn" onclick="editWord('${archive.replace(/'/g,"\\'")}','${item.word.replace(/'/g,"\\'")}')">✏️</button>
-                        <button class="icon-btn" onclick="deleteWord('${archive.replace(/'/g,"\\'")}','${item.word.replace(/'/g,"\\'")}')">🗑️</button>
+                        <button class="icon-btn" onclick="editWord('${safeArchive}','${safeWord}')">✏️</button>
+                        <button class="icon-btn" onclick="deleteWord('${safeArchive}','${safeWord}')">🗑️</button>
                     </div>`;
                 groupDiv.appendChild(wordDiv);
             });
